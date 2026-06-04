@@ -1,6 +1,6 @@
 #!/bin/bash
 
-echo "🎙️ Voice Scheduling Agent — Local Setup"
+echo "🎙️ Ram Voice Scheduling Agent — Local Setup"
 echo "========================================"
 
 if ! command -v conda &> /dev/null; then

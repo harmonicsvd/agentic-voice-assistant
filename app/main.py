@@ -1,10 +1,10 @@
-"""FastAPI backend for auth, calendar tools, and weather-summary delegation."""
+"""Ram backend: auth, voice calendar tools, and delegation to Sham intelligence."""
 
 import hmac
 import json
 from contextlib import asynccontextmanager
 import logging
-from fastapi import FastAPI, Request, Query, Header
+from fastapi import FastAPI, Request, Query, Header, UploadFile, File
 from pathlib import Path
 from fastapi.responses import JSONResponse, Response, RedirectResponse, FileResponse
 
@@ -15,7 +15,9 @@ from pydantic import BaseModel, Field, ValidationError
 from typing import Literal, Any
 
 from app.db import init_db, get_db, db_execute
-
+from uuid import uuid4
+from io import BytesIO
+from pypdf import PdfReader
 
 
 from datetime import datetime, timedelta, timezone
@@ -36,7 +38,7 @@ async def lifespan(app: FastAPI):
     # optional cleanup when server stops
 
 app = FastAPI(lifespan=lifespan)
-logger = logging.getLogger(__name__)
+logger = logging.getLogger("uvicorn.error")
 
 app.add_middleware(
     CORSMiddleware,
@@ -184,12 +186,12 @@ async def _fetch_meetings_summary_from_weather_agent(
     timezone_name: str,
 ) -> dict[str, Any]:
     """
-    Call weather-agent internal summary endpoint and validate minimal contract.
+    Call Sham (`weather-agent`) internal summary endpoint and validate its contract.
 
     This function is the cross-service boundary between voice backend and
     weather reasoning backend.
     """
-    # Voice backend delegates weather reasoning to weather-agent API.
+    # Ram handles the employee request; Sham owns weather reasoning.
     if not settings.weather_agent_base_url:
         raise RuntimeError("WEATHER_AGENT_BASE_URL is not configured.")
     if not settings.weather_agent_internal_api_key:
@@ -569,7 +571,7 @@ async def create_event(
         event = {
             'summary': title,
             'description': (
-                f"Scheduled by {name} via Voice Scheduling Agent. "
+                f"Scheduled by {name} via Ram Voice Scheduling Agent. "
                 f"{'; '.join(metadata_parts)}"
             ),
 
@@ -729,7 +731,7 @@ async def meetings_weather_summary(
 ):
     """
     VAPI tool endpoint for "what are my meetings" requests.
-    Delegates summary generation to weather-agent internal API.
+    Ram receives the voice tool call and delegates summary generation to Sham.
     """
     raw_payload = await request.json()
     req_started = time.perf_counter()
@@ -877,6 +879,90 @@ async def auth_logout(request: Request):
     """Clear browser session data."""
     request.session.clear()
     return {"ok": True}
+
+@app.post("/knowledge/upload")
+async def upload_knowledge_pdf(
+    request: Request,
+    file: UploadFile = File(...),
+):
+    """Accept a Ram user PDF and forward it to Sham for RAG ingestion."""
+    user, error = get_current_user_or_401(request)
+    if error:
+        return error
+
+    if file.content_type != "application/pdf":
+        return JSONResponse(
+            {"error": "Only PDF files are supported"},
+            status_code=400,
+        )
+
+    file_bytes = await file.read()
+    
+    if not file_bytes:
+        return JSONResponse(
+            {"error": "Uploaded file is empty"},
+            status_code=400,
+        )
+
+    if not settings.weather_agent_knowledge_upload_url:
+        return JSONResponse(
+            {"error": "Weather-agent knowledge upload URL is not configured"},
+            status_code=500,
+        )
+
+    async with httpx.AsyncClient(
+        timeout=settings.weather_agent_timeout_seconds
+    ) as client:
+        response = await client.post(
+            settings.weather_agent_knowledge_upload_url,
+            data={"user_sub": user["sub"]},
+            files={
+                "file": (
+                    file.filename or "upload.pdf",
+                    file_bytes,
+                    "application/pdf",
+                )
+            },
+            headers={
+                "X-Internal-API-Key": settings.weather_agent_internal_api_key,
+            },
+        )
+
+    if response.status_code >= 400:
+        logger.error(
+            "knowledge_pdf_forward_failed user_sub=%s status=%s body=%s",
+            user["sub"],
+            response.status_code,
+            response.text,
+        )
+        return JSONResponse(
+            {"error": "Weather-agent PDF ingestion failed"},
+            status_code=502,
+        )
+
+    logger.info(
+        "knowledge_pdf_forwarded user_sub=%s filename=%s size_bytes=%s",
+        user["sub"],
+        file.filename,
+        len(file_bytes),
+    )
+
+    return response.json()
+    
+def extract_pdf_to_markdown(file_bytes: bytes, original_name: str) -> str:
+    """Extract PDF pages into simple Markdown for later chunking."""
+    reader = PdfReader(BytesIO(file_bytes))
+
+    sections = [f"# {original_name}"]
+
+    for page_number, page in enumerate(reader.pages, start=1):
+        text = (page.extract_text() or "").strip()
+
+        if text:
+            sections.append(f"## Page {page_number}\n\n{text}")
+
+    return "\n\n".join(sections).strip()
+
 
 
 def get_current_user_or_401(request: Request):

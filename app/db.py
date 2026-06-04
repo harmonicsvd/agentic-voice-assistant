@@ -53,8 +53,22 @@ def init_db():
         updated_at TEXT NOT NULL
     )
     """
+    knowledge_documents_ddl = """
+    CREATE TABLE IF NOT EXISTS user_knowledge_documents (
+        id TEXT PRIMARY KEY,
+        user_sub TEXT NOT NULL,
+        original_filename TEXT NOT NULL,
+        stored_filename TEXT NOT NULL,
+        storage_path TEXT NOT NULL,
+        markdown_path TEXT,
+        size_bytes INTEGER NOT NULL,
+        status TEXT NOT NULL DEFAULT 'uploaded',
+        uploaded_at TEXT NOT NULL
+    )
+    """
     with get_db() as conn:
         conn.execute(ddl)
+        conn.execute(knowledge_documents_ddl)
     logger.info("init_db complete | USING_POSTGRES=%s", USING_POSTGRES)
 
 

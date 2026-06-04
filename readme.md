@@ -1,13 +1,13 @@
-# Voice Scheduling Agent
+# Ram Voice Scheduling Agent
 
-FastAPI backend + web client for authenticated voice-based meeting scheduling.
+Ram is the employee-facing FastAPI backend + web client for authenticated voice-based meeting scheduling.
 
 ## What It Does
 - Handles Google OAuth login/session.
 - Accepts VAPI tool webhooks to create calendar events.
 - Exposes calendar read endpoints.
 - Stores user profile defaults (`default_city`, `timezone`).
-- Provides meetings summary endpoints by delegating weather scoring to `weather-agent`.
+- Provides meetings summary endpoints by delegating weather scoring to Sham (`weather-agent`).
 
 ## Scope
 This repository owns:
@@ -16,9 +16,9 @@ This repository owns:
 - VAPI webhook integration (`create-event`, `meetings-weather-summary`)
 - Frontend pages (`/login`, `/assistant`) and VAPI SDK bootstrap
 
-It integrates with:
+Ram integrates with:
 - Google Calendar API
-- `weather-agent` internal API (`/internal/meeting-weather-summary`)
+- Sham (`weather-agent`) internal API (`/internal/meeting-weather-summary`)
 
 ## API Surface
 Defined in `app/main.py`.
@@ -63,14 +63,14 @@ Expected arguments:
 - `date` (`YYYY-MM-DD`, optional)
 - `timezone` (optional, default `Europe/Berlin`)
 
-## Integration With `weather-agent`
+## Integration With Sham (`weather-agent`)
 Summary flow:
 1. `POST /meetings-weather-summary` receives tool call.
 2. Backend validates auth/internal key + resolves `user_sub`.
 3. Backend calls `GET {WEATHER_AGENT_BASE_URL}/internal/meeting-weather-summary`.
 4. Returns `summary_text` back to VAPI tool result.
 
-Weather-agent summary generation is hybrid:
+Sham summary generation is hybrid:
 - deterministic event-time risk scoring (`low/moderate/high/blocked/unknown`)
 - structured LLM rewrite for recommendation wording
 

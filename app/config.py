@@ -19,13 +19,13 @@ class Settings:
     google_oauth_client_id: str = os.getenv("GOOGLE_OAUTH_CLIENT_ID", "")
     google_oauth_client_secret: str = os.getenv("GOOGLE_OAUTH_CLIENT_SECRET", "")
     app_secret_key: str = os.getenv("APP_SECRET_KEY", "dev-secret")
-    # Internal backend-to-backend auth key (weather-agent <-> voice-agent).
+    # Internal backend-to-backend auth key (Sham <-> Ram).
     internal_api_key: str = os.getenv("INTERNAL_API_KEY", "")
-    # Weather-agent service connection used by meetings summary endpoint.
+    # Sham (`weather-agent`) connection used by Ram summary and upload endpoints.
     weather_agent_base_url: str = os.getenv("WEATHER_AGENT_BASE_URL", "").rstrip("/")
     weather_agent_internal_api_key: str = os.getenv("WEATHER_AGENT_INTERNAL_API_KEY", "")
     weather_agent_timeout_seconds: float = float(os.getenv("WEATHER_AGENT_TIMEOUT_SECONDS", "20"))
-
+    weather_agent_knowledge_upload_url: str = os.getenv("WEATHER_AGENT_KNOWLEDGE_UPLOAD_URL","")
     vapi_public_key: str = os.getenv("VAPI_PUBLIC_KEY", "")
     app_db_path: str = os.getenv("APP_DB_PATH", "app.db")
     

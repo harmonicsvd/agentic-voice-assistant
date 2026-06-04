@@ -158,7 +158,7 @@ async def get_vapi_key():
 @app.get("/")
 def root():
     """Health-check endpoint for quick "is server alive?" checks."""
-    return {"status": "Voice Scheduling Agent is running!"}
+    return {"status": "Ram Voice Scheduling Agent is running!"}
 
 
 @app.post("/create-event")
@@ -229,7 +229,7 @@ async def create_event(request: Request):
         # Build the Google Calendar event payload.
         event = {
             "summary": title,
-            "description": f"Scheduled by {name} via Voice Scheduling Agent.",
+            "description": f"Scheduled by {name} via Ram Voice Scheduling Agent.",
             "start": {
                 "dateTime": event_start.isoformat(),
                 "timeZone": "Europe/Berlin",
