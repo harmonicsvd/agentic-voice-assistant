@@ -16,9 +16,6 @@ from typing import Literal, Any
 
 from app.db import init_db, get_db, db_execute
 from uuid import uuid4
-from io import BytesIO
-from pypdf import PdfReader
-
 
 from datetime import datetime, timedelta, timezone
 import httpx
@@ -948,21 +945,6 @@ async def upload_knowledge_pdf(
     )
 
     return response.json()
-    
-def extract_pdf_to_markdown(file_bytes: bytes, original_name: str) -> str:
-    """Extract PDF pages into simple Markdown for later chunking."""
-    reader = PdfReader(BytesIO(file_bytes))
-
-    sections = [f"# {original_name}"]
-
-    for page_number, page in enumerate(reader.pages, start=1):
-        text = (page.extract_text() or "").strip()
-
-        if text:
-            sections.append(f"## Page {page_number}\n\n{text}")
-
-    return "\n\n".join(sections).strip()
-
 
 
 def get_current_user_or_401(request: Request):
