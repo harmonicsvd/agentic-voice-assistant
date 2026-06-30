@@ -73,8 +73,10 @@ class VoiceOrchestrator:
         return llm_response
     
     def synthesize_speech(self, text: str) -> bytes:
-        """Convert text to speech using Piper TTS."""
+        """Convert text to speech using Piper TTS with WAV headers."""
         from piper import PiperVoice
+        import wave
+        import io
         
         # Lazy load the voice model
         if self._tts_voice is None:
@@ -84,7 +86,16 @@ class VoiceOrchestrator:
         audio_generator = self._tts_voice.synthesize(text)
         audio_bytes = b''.join(chunk.audio_int16_bytes for chunk in audio_generator)
         
-        return audio_bytes
+        # Create WAV file in memory with headers
+        wav_buffer = io.BytesIO()
+        with wave.open(wav_buffer, 'wb') as wav_file:
+            wav_file.setnchannels(1)  # Mono
+            wav_file.setsampwidth(2)  # 16-bit
+            wav_file.setframerate(self._tts_voice.config.sample_rate)
+            wav_file.writeframes(audio_bytes)
+        
+        wav_buffer.seek(0)
+        return wav_buffer.read()
     
     def run_pipeline(self, audio_bytes: bytes) -> bytes:
         """Run the full pipeline: audio → text → LLM → tools → audio."""
