@@ -1,0 +1,14 @@
+# Optional local STT dependencies for the open-source voice stack.
+# Install only when running Ram with local Whisper transcription.
+
+# Current Whisper (for comparison/testing)
+torch
+transformers
+accelerate
+
+# Faster-Whisper (for real-time streaming STT)
+faster-whisper
+
+# Additional dependencies for audio processing
+soundfile
+numpy

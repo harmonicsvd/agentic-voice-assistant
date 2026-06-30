@@ -4,12 +4,15 @@ import hmac
 import json
 from contextlib import asynccontextmanager
 import logging
-from fastapi import FastAPI, Request, Query, Header, UploadFile, File
+from fastapi import FastAPI, Request, Query, Header, UploadFile, File, WebSocket, WebSocketDisconnect
 from pathlib import Path
 from fastapi.responses import JSONResponse, Response, RedirectResponse, FileResponse
 
 from app.config import settings
 from app.google_clients import get_calendar_service, build_oauth
+from app.stt import transcribe_audio_bytes
+
+from app.orchestration import VoiceOrchestrator
 
 from pydantic import BaseModel, Field, ValidationError
 from typing import Literal, Any
@@ -31,6 +34,11 @@ from starlette.middleware.sessions import SessionMiddleware
 async def lifespan(app: FastAPI):
     """Initialize persistent resources once at process startup."""
     init_db()   # runs once when server starts
+
+    # Initialize voice orchestrator
+    app.state.voice_orchestrator = VoiceOrchestrator()
+
+
     yield       # app serves requests here
     # optional cleanup when server stops
 
@@ -449,6 +457,105 @@ def health_head():
     """HEAD variant for liveness checks."""
     return Response(status_code=200)
 
+
+@app.post("/stt/transcribe")
+async def transcribe_audio(
+    request: Request,
+    file: UploadFile = File(...),
+):
+    """Transcribe browser-recorded audio with local Whisper."""
+    user, error = get_current_user_or_401(request)
+    if error:
+        return error
+
+    file_bytes = await file.read()
+    if not file_bytes:
+        return JSONResponse({"error": "Audio file is empty"}, status_code=400)
+
+    suffix = Path(file.filename or "audio.webm").suffix or ".webm"
+
+    try:
+        transcript = transcribe_audio_bytes(file_bytes, suffix=suffix)
+    except RuntimeError as exc:
+        logger.error("local_stt_not_available error=%s", exc)
+        return JSONResponse({"error": str(exc)}, status_code=500)
+    except Exception as exc:
+        logger.exception("local_stt_transcription_failed")
+        return JSONResponse({"error": f"Transcription failed: {exc}"}, status_code=500)
+
+    logger.info(
+        "local_stt_transcribed user_sub=%s filename=%s size_bytes=%s chars=%s",
+        user["sub"],
+        file.filename,
+        len(file_bytes),
+        len(transcript),
+    )
+    return {"transcript": transcript}
+
+@app.websocket("/ws/stt")
+async def stt_websocket(websocket: WebSocket):
+    """Receive browser audio chunks over WebSocket and transcribe after stop."""
+    await websocket.accept()
+
+    audio_chunks: list[bytes] = []
+    suffix = ".webm"
+
+    try:
+        while True:
+            message = await websocket.receive()
+
+            if "bytes" in message and message["bytes"] is not None:
+                audio_chunks.append(message["bytes"])
+                await websocket.send_json({
+                    "type": "chunk_received",
+                    "chunks": len(audio_chunks),
+                })
+                continue
+
+            if "text" in message and message["text"]:
+                payload = json.loads(message["text"])
+
+                if payload.get("type") == "start":
+                    suffix = payload.get("suffix") or ".webm"
+                    audio_chunks.clear()
+                    await websocket.send_json({"type": "started"})
+                    continue
+
+                if payload.get("type") == "stop":
+                    if not audio_chunks:
+                        await websocket.send_json({
+                            "type": "error",
+                            "error": "No audio chunks received",
+                        })
+                        continue
+
+                    await websocket.send_json({"type": "transcribing"})
+
+                    audio_bytes = b"".join(audio_chunks)
+                    transcript = transcribe_audio_bytes(audio_bytes, suffix=suffix)
+
+                    await websocket.send_json({
+                        "type": "transcript",
+                        "transcript": transcript,
+                    })
+                    audio_chunks.clear()
+                    continue
+
+                await websocket.send_json({
+                    "type": "error",
+                    "error": "Unknown message type",
+                })
+
+    except WebSocketDisconnect:
+        logger.info("stt_websocket_disconnected chunks=%s", len(audio_chunks))
+    except Exception as exc:
+        logger.exception("stt_websocket_failed")
+        await websocket.send_json({
+            "type": "error",
+            "error": str(exc),
+        })
+        
+        
 @app.post("/create-event")
 async def create_event(
     request: Request,
@@ -828,6 +935,32 @@ async def meetings_weather_summary_internal(
         return JSONResponse(content={"error": str(e)}, status_code=400)
     except Exception as e:
         return JSONResponse(content={"error": str(e)}, status_code=500)
+
+
+@app.post("/voice/process")
+async def process_voice(
+    request: Request,
+    audio: UploadFile = File(...),
+):
+    """
+    Open-source voice processing endpoint.
+    Accepts audio file, processes through STT → LLM → TTS pipeline,
+    and returns audio response.
+    """
+    orchestrator = request.app.state.voice_orchestrator
+    
+    # Read audio bytes
+    audio_bytes = await audio.read()
+    
+    # Process through pipeline
+    output_audio = orchestrator.run_pipeline(audio_bytes)
+    
+    # Return audio as WAV
+    return Response(
+        content=output_audio,
+        media_type="audio/wav",
+        headers={"Content-Disposition": "attachment; filename=response.wav"}
+    )
 
 
 @app.get("/auth/google/login")

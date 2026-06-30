@@ -568,7 +568,7 @@
           <p class="card-copy">Tap the mic, speak your request, and Ram will guide the rest.</p>
 
           <div class="voice-block">
-            <div class="btn-wrap" onclick="toggleCall()">
+            <div class="btn-wrap" onclick="toggleLocalRecording()">
               <div class="ring ring-1" id="ring1"></div>
               <div class="ring ring-2" id="ring2"></div>
               <div class="mic-btn" id="micBtn">
@@ -817,6 +817,120 @@ if (isCreateSuccess) {
           });
       }
     }
+ 
+ 
+   // Local Whisper STT test
+var localRecorder = null;
+var localStream = null;
+var localSocket = null;
+var localRecording = false;
+
+function getSttWebSocketUrl() {
+  var protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
+  return protocol + "//" + window.location.host + "/ws/stt";
+}
+
+async function toggleLocalRecording() {
+  if (localRecording) {
+    stopLocalRecording();
+    return;
+  }
+
+  await startLocalRecording();
+}
+
+async function startLocalRecording() {
+  try {
+    document.getElementById("status").textContent = "Opening microphone...";
+    document.getElementById("status").className = "status";
+
+    localStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    localSocket = new WebSocket(getSttWebSocketUrl());
+
+    localSocket.onopen = function () {
+      localSocket.send(JSON.stringify({
+        type: "start",
+        suffix: ".webm"
+      }));
+
+      localRecorder = new MediaRecorder(localStream, {
+        mimeType: "audio/webm"
+      });
+
+      localRecorder.ondataavailable = function (event) {
+        if (event.data && event.data.size > 0 && localSocket.readyState === WebSocket.OPEN) {
+          localSocket.send(event.data);
+        }
+      };
+
+      localRecorder.start(1000);
+
+      localRecording = true;
+      document.getElementById("micBtn").classList.add("active");
+      document.getElementById("ring1").classList.add("active");
+      document.getElementById("ring2").classList.add("active");
+      document.getElementById("btnLabel").textContent = "Tap to stop recording";
+      document.getElementById("btnHint").textContent = "Recording locally...";
+      document.getElementById("status").textContent = "Listening with local Whisper STT";
+      document.getElementById("status").className = "status active";
+    };
+
+    localSocket.onmessage = function (event) {
+      var message = JSON.parse(event.data);
+
+      if (message.type === "transcribing") {
+        document.getElementById("status").textContent = "Transcribing...";
+      }
+
+      if (message.type === "transcript") {
+        document.getElementById("status").textContent = "Transcript: " + message.transcript;
+        document.getElementById("status").className = "status active";
+      }
+
+      if (message.type === "error") {
+        document.getElementById("status").textContent = message.error;
+        document.getElementById("status").className = "status error";
+      }
+    };
+
+    localSocket.onerror = function () {
+      document.getElementById("status").textContent = "Local STT connection failed.";
+      document.getElementById("status").className = "status error";
+    };
+
+  } catch (err) {
+    console.error("Local recording failed", err);
+    document.getElementById("status").textContent = "Microphone permission failed.";
+    document.getElementById("status").className = "status error";
+  }
+}
+
+function stopLocalRecording() {
+  if (localRecorder && localRecorder.state !== "inactive") {
+    localRecorder.stop();
+  }
+
+  if (localSocket && localSocket.readyState === WebSocket.OPEN) {
+    setTimeout(function () {
+      localSocket.send(JSON.stringify({ type: "stop" }));
+    }, 250);
+  }
+
+  if (localStream) {
+    localStream.getTracks().forEach(function (track) {
+      track.stop();
+    });
+  }
+
+  localRecording = false;
+  document.getElementById("micBtn").classList.remove("active");
+  document.getElementById("ring1").classList.remove("active");
+  document.getElementById("ring2").classList.remove("active");
+  document.getElementById("btnLabel").textContent = "Tap to start recording";
+  document.getElementById("btnHint").textContent = "Speak, then tap again to transcribe";
+  document.getElementById("status").textContent = "Sending audio...";
+}
+
   </script>
 
 </body>
