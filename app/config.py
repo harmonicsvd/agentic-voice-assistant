@@ -28,6 +28,7 @@ class Settings:
     weather_agent_knowledge_upload_url: str = os.getenv("WEATHER_AGENT_KNOWLEDGE_UPLOAD_URL","")
     vapi_public_key: str = os.getenv("VAPI_PUBLIC_KEY", "")
     app_db_path: str = os.getenv("APP_DB_PATH", "app.db")
+    react_dev_url: str = os.getenv("REACT_DEV_URL", "http://localhost:5173")
     
    
 

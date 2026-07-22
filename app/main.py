@@ -5,6 +5,7 @@ import json
 from contextlib import asynccontextmanager
 import logging
 from fastapi import FastAPI, Request, Query, Header, UploadFile, File, WebSocket, WebSocketDisconnect
+from fastapi.staticfiles import StaticFiles
 from pathlib import Path
 from fastapi.responses import JSONResponse, Response, RedirectResponse, FileResponse
 
@@ -23,12 +24,15 @@ from uuid import uuid4
 from datetime import datetime, timedelta, timezone
 import httpx
 import time
+from app.Vad import VoiceActivityDetector
+from app.streaming_main import streaming_handler
 
 import re
+from typing import Optional
 from fastapi.middleware.cors import CORSMiddleware
 from starlette.middleware.sessions import SessionMiddleware
 
-
+from app.pipecat_websocket import pipecat_websocket_handler
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -51,11 +55,13 @@ app.add_middleware(
         "https://voice-scheduling-agent-pi.vercel.app",
         "http://localhost:3000",
         "http://127.0.0.1:5500",
+        "http://localhost:5173",
+        "http://127.0.0.1:5173",
     ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
-   
+
 )
 app.add_middleware(
     SessionMiddleware,
@@ -494,22 +500,55 @@ async def transcribe_audio(
 
 @app.websocket("/ws/stt")
 async def stt_websocket(websocket: WebSocket):
-    """Receive browser audio chunks over WebSocket and transcribe after stop."""
+    """Receive browser audio chunks over WebSocket with VAD-based speech detection."""
     await websocket.accept()
 
     audio_chunks: list[bytes] = []
     suffix = ".webm"
+    
+    # Initialize VAD
+    vad = VoiceActivityDetector(aggressiveness=3, sample_rate=16000, frame_duration_ms=30)
+    speech_detected = False
 
     try:
         while True:
             message = await websocket.receive()
 
             if "bytes" in message and message["bytes"] is not None:
-                audio_chunks.append(message["bytes"])
-                await websocket.send_json({
-                    "type": "chunk_received",
-                    "chunks": len(audio_chunks),
-                })
+                audio_data = message["bytes"]
+                audio_chunks.append(audio_data)
+                
+                # Process with VAD
+                vad_result = vad.process_frame(audio_data)
+                
+                if vad_result == "speech":
+                    if not speech_detected:
+                        speech_detected = True
+                        await websocket.send_json({
+                            "type": "speech_started",
+                        })
+                    await websocket.send_json({
+                        "type": "chunk_received",
+                        "chunks": len(audio_chunks),
+                    })
+                elif vad_result == "speech_ended":
+                    # Speech ended, trigger transcription
+                    if audio_chunks:
+                        await websocket.send_json({"type": "transcribing"})
+                        
+                        audio_bytes = b"".join(audio_chunks)
+                        transcript = transcribe_audio_bytes(audio_bytes, suffix=suffix)
+                        
+                        await websocket.send_json({
+                            "type": "transcript",
+                            "transcript": transcript,
+                        })
+                        
+                        # Reset for next utterance
+                        audio_chunks.clear()
+                        vad.reset()
+                        speech_detected = False
+                # Silence - keep collecting but don't notify
                 continue
 
             if "text" in message and message["text"]:
@@ -518,27 +557,26 @@ async def stt_websocket(websocket: WebSocket):
                 if payload.get("type") == "start":
                     suffix = payload.get("suffix") or ".webm"
                     audio_chunks.clear()
+                    vad.reset()
+                    speech_detected = False
                     await websocket.send_json({"type": "started"})
                     continue
 
                 if payload.get("type") == "stop":
-                    if not audio_chunks:
+                    # Manual stop - transcribe whatever we have
+                    if audio_chunks:
+                        await websocket.send_json({"type": "transcribing"})
+                        
+                        audio_bytes = b"".join(audio_chunks)
+                        transcript = transcribe_audio_bytes(audio_bytes, suffix=suffix)
+                        
                         await websocket.send_json({
-                            "type": "error",
-                            "error": "No audio chunks received",
+                            "type": "transcript",
+                            "transcript": transcript,
                         })
-                        continue
-
-                    await websocket.send_json({"type": "transcribing"})
-
-                    audio_bytes = b"".join(audio_chunks)
-                    transcript = transcribe_audio_bytes(audio_bytes, suffix=suffix)
-
-                    await websocket.send_json({
-                        "type": "transcript",
-                        "transcript": transcript,
-                    })
-                    audio_chunks.clear()
+                        audio_chunks.clear()
+                        vad.reset()
+                        speech_detected = False
                     continue
 
                 await websocket.send_json({
@@ -554,8 +592,14 @@ async def stt_websocket(websocket: WebSocket):
             "type": "error",
             "error": str(exc),
         })
-        
-        
+
+
+@app.websocket("/ws/pipecat")
+async def pipecat_websocket(websocket: WebSocket):
+    """WebSocket endpoint for Pipecat real-time voice pipeline."""
+    await pipecat_websocket_handler(websocket)
+    
+   
 @app.post("/create-event")
 async def create_event(
     request: Request,
@@ -653,6 +697,9 @@ async def create_event(
         # Parse date and time
         event_datetime_str = f"{date} {time}"
         event_start = datetime.strptime(event_datetime_str, "%Y-%m-%d %H:%M")
+        
+        # Get user timezone from profile
+        user_timezone = _lookup_profile_timezone(caller_sub) or "Europe/Berlin"
 
         # Parse duration naturally
         duration_minutes = parse_duration_to_minutes(duration)
@@ -681,11 +728,11 @@ async def create_event(
 
             'start': {
                 'dateTime': event_start.isoformat(),
-                'timeZone': 'Europe/Berlin',
+                'timeZone': user_timezone,
             },
             'end': {
                 'dateTime': event_end.isoformat(),
-                'timeZone': 'Europe/Berlin',
+                'timeZone': user_timezone,
             },
         }
         if location:
@@ -936,31 +983,129 @@ async def meetings_weather_summary_internal(
     except Exception as e:
         return JSONResponse(content={"error": str(e)}, status_code=500)
 
-
 @app.post("/voice/process")
 async def process_voice(
     request: Request,
-    audio: UploadFile = File(...),
+    x_internal_api_key: str = Header(default=None)
 ):
-    """
-    Open-source voice processing endpoint.
-    Accepts audio file, processes through STT → LLM → TTS pipeline,
-    and returns audio response.
-    """
+    """Process voice input and return audio response with session management."""
+    # Verify API key
+    if not x_internal_api_key or not hmac.compare_digest(x_internal_api_key, settings.internal_api_key):
+        return JSONResponse({"error": "Unauthorized"}, status_code=401)
+    
+    # Get audio data
+    audio_bytes = await request.body()
+    
+    # Get session_id from query parameter or header
+    session_id = request.query_params.get("session_id") or request.headers.get("X-Session-ID")
+    
+    # Get user_sub from header
+    user_sub = request.headers.get("X-User-Sub")
+    
+    # Run pipeline with session
     orchestrator = request.app.state.voice_orchestrator
+    output_audio = orchestrator.run_pipeline(audio_bytes, user_sub=user_sub, session_id=session_id)
     
-    # Read audio bytes
-    audio_bytes = await audio.read()
-    
-    # Process through pipeline
-    output_audio = orchestrator.run_pipeline(audio_bytes)
-    
-    # Return audio as WAV
+    # Return WAV audio
     return Response(
         content=output_audio,
         media_type="audio/wav",
-        headers={"Content-Disposition": "attachment; filename=response.wav"}
+        headers={
+            "Content-Disposition": "attachment; filename=response.wav",
+            "X-Session-ID": session_id or "default"
+        }
     )
+
+
+@app.websocket("/voice/ws")
+async def voice_websocket(websocket: WebSocket):
+    """WebSocket endpoint for real-time voice streaming with VAD and full pipeline."""
+    await websocket.accept()
+    
+    # Get session info
+    session_id = websocket.query_params.get("session_id", "default")
+    user_sub = websocket.query_params.get("user_sub", "")
+    
+    print(f"WebSocket connected: session_id={session_id}, user_sub={user_sub}")
+    
+    is_processing = False
+
+    orchestrator = request.app.state.voice_orchestrator
+    
+    try:
+        # Greeting disabled for now - frontend not handling pre-user audio
+        # greeting = "Hello, I'm your voice assistant. How can I help you today?"
+        # print("Sending greeting...")
+        # for chunk in orchestrator.synthesize_speech_streaming(greeting):
+        #     await websocket.send_bytes(chunk)
+        
+        while True:
+            try:
+                message = await websocket.receive()
+                print(f"Received message type: {message.get('type')}, has bytes: {'bytes' in message}, has text: {'text' in message}")
+            except Exception:
+                break
+
+            # Handle audio (now complete file)
+            if "bytes" in message and message["bytes"] is not None:
+                audio_data = message["bytes"]
+                
+                if not is_processing:
+                    is_processing = True
+                    print(f"Received complete audio file: {len(audio_data)} bytes")
+                    
+                    try:
+                        chunk_count = 0
+                        async for audio_chunk in orchestrator.run_pipeline_streaming(
+                            audio_data, 
+                            user_sub=user_sub, 
+                            session_id=session_id
+                        ):
+                            chunk_count += 1
+                            await websocket.send_bytes(audio_chunk)
+                        
+                        print(f"Backend: Sent {chunk_count} audio chunks, sending audio_complete signal")
+                        # Signal end of audio stream
+                        await websocket.send_json({
+                            "type": "audio_complete"
+                        })
+                    except Exception as e:
+                        print(f"Pipeline error: {e}")
+                        await websocket.send_json({
+                            "type": "error",
+                            "error": str(e)
+                        })
+                    
+                    is_processing = False
+                else:
+                    print("Already processing, ignoring audio")
+
+            # Handle text messages (control commands)
+            elif "text" in message and message["text"]:
+                payload = json.loads(message["text"])
+                print(f"Received text command: {payload}")
+    except WebSocketDisconnect:
+        print(f"WebSocket disconnected: session_id={session_id}")
+    except Exception as exc:
+        print(f"WebSocket error: {exc}")
+        try:
+            await websocket.send_json({
+                "type": "error",
+                "error": str(exc)
+            })
+        except Exception:
+            pass
+
+
+
+@app.websocket("/voice/streaming/ws")
+async def voice_streaming_websocket(websocket: WebSocket):
+    """WebSocket endpoint for real-time streaming voice interaction with Deepgram STT/TTS."""
+    session_id = websocket.query_params.get("session_id", "default")
+    user_sub = websocket.query_params.get("user_sub", "")
+    
+    await streaming_handler.handle_connection(websocket, session_id, user_sub)
+
 
 
 @app.get("/auth/google/login")
@@ -992,7 +1137,9 @@ async def auth_google_callback(request: Request):
 
     user_sub = request.session["user"].get("sub", "")
     destination = "/assistant" if _is_profile_complete(_get_profile_row(user_sub)) else "/setup"
-    return RedirectResponse(url=f"{destination}?user_sub={user_sub}", status_code=302)
+    # Redirect to React dev server for development
+    react_url = getattr(settings, 'react_dev_url', 'http://localhost:5173')
+    return RedirectResponse(url=f"{react_url}{destination}?user_sub={user_sub}", status_code=302)
 
 
 @app.get("/auth/me")
@@ -1002,7 +1149,6 @@ async def auth_me(request: Request):
     if not user:
         return JSONResponse({"authenticated": False}, status_code=401)
     return {"authenticated": True, "user": user}
-
 
 @app.post("/auth/logout")
 async def auth_logout(request: Request):
@@ -1130,3 +1276,24 @@ def _lookup_profile_city(sub: str | None) -> str | None:
         ).fetchone()
     city = (row["default_city"] or "").strip() if row else ""
     return city or None
+
+
+def _lookup_profile_timezone(sub: str | None) -> str | None:
+    """Read timezone from local profile DB for event scheduling."""
+    if not sub:
+        return None
+
+    with get_db() as conn:
+        row = db_execute(
+            conn,
+            "SELECT timezone FROM user_profiles WHERE sub = %s",
+            (sub,),
+        ).fetchone()
+    tz = (row["timezone"] or "").strip() if row else ""
+    return tz or None
+
+
+# Mount static files for frontend (must be after all route definitions)
+# Only for production when serving built React app
+if Path("frontend/dist").exists():
+    app.mount("/", StaticFiles(directory="frontend/dist", html=True), name="static")

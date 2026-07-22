@@ -6,9 +6,29 @@ torch
 transformers
 accelerate
 
-# Faster-Whisper (for real-time streaming STT)
+# Faster-Whisper (for batch STT)
 faster-whisper
+
+# mlx-whisper (optimized for Apple Silicon - streaming STT)
+mlx-whisper
+mlx
+mlx-metal
 
 # Additional dependencies for audio processing
 soundfile
+sounddevice
+librosa
 numpy
+torchaudio
+
+# LangChain and orchestration
+langchain
+langchain-community
+langgraph
+langchain-ollama
+websockets
+python-multipart
+webrtcvad
+
+
+deepgram-sdk>=3.0.0
