@@ -10,4 +10,5 @@ API-Key.pdf
 data/knowledge_uploads/
 app.db
 *.wav
-voice_models/
+voice_models/*.onnx
+*.onnx.json
