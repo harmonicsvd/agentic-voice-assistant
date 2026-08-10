@@ -1,5 +1,7 @@
 # Agentic Voice Assistant
 
+![Emo](Emo.png)
+
 ## 🎯 Project Vision
 
 Build a natural, conversational AI assistant that combines voice interaction with intelligent task execution. Create a seamless hands-free experience where users can interact with various digital services through natural speech. The system is designed to be extensible - users can install different tools, with calendar management being the current implementation.
