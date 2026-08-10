@@ -9,3 +9,15 @@ itsdangerous>=2.2.0
 httpx>=0.27.0
 psycopg[binary]
 python-multipart
+langgraph
+langchain
+langchain-core
+langchain-openai
+langchain-community
+pipecat-ai
+faster-whisper
+mlx-whisper
+piper-tts
+numpy
+
+starlette

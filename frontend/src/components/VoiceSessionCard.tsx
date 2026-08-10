@@ -1,5 +1,7 @@
-import { useState } from 'react';
-import { PipecatClient } from '@pipecat-ai/client-js';
+import { useState, useEffect } from 'react';
+import { PipecatClient, RTVIEvent } from '@pipecat-ai/client-js';
+import LottieCharacter from './characters/LottieCharacter';
+import { UI_CONFIG, CharacterState } from '../config/ui-config';
 
 interface VoiceSessionCardProps {
   userSub: string;
@@ -16,13 +18,77 @@ interface Meeting {
 export const VoiceSessionCard = ({ userSub, client }: VoiceSessionCardProps) => {
   const [meetings, setMeetings] = useState<Meeting[]>([]);
   const [status, setStatus] = useState('');
-  const [btnLabel, setBtnLabel] = useState('Tap to start call');
-  const [btnHint, setBtnHint] = useState('Speak naturally — the agent will guide you');
+  const [btnLabel, setBtnLabel] = useState(UI_CONFIG.voiceSession.buttonLabels.startCall);
+  const [btnHint, setBtnHint] = useState(UI_CONFIG.voiceSession.buttonHints.idle);
   
   const [isConnected, setIsConnected] = useState(false);
   const [isRecording, setIsRecording] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
-  
+  const [botReady, setBotReady] = useState(false);
+  const [isFirstResponse, setIsFirstResponse] = useState(true); // Track first response
+
+  const [jerryState, setJerryState] = useState<CharacterState>('idle');
+
+  // Connect Pipecat events to character state
+  useEffect(() => {
+    if (!client) return;
+
+    const handleUserStartedSpeaking = () => {
+      if (isRecording && botReady) setJerryState('thinking'); // User speaks → thinking
+    };
+    const handleUserStoppedSpeaking = () => {
+      if (isRecording && botReady) setJerryState('success'); // User stops → smile (agent ready)
+    };
+    const handleBotLlmStarted = () => {
+      if (isRecording && botReady && !isFirstResponse) setJerryState('processing'); // Bot searching → monocle (skip first response)
+    };
+    const handleFunctionCallStarted = () => {
+      if (isRecording && botReady) setJerryState('processing'); // Function call → monocle
+    };
+    const handleBotTtsStarted = () => {
+      if (isRecording && botReady) {
+        setJerryState('speaking'); // Bot speaks → smile
+        setIsFirstResponse(false); // Reset after first response
+      }
+    };
+    const handleBotTtsStopped = () => {
+      if (isRecording && botReady) setJerryState('success'); // Bot stops → smile (ready)
+    };
+    const handleBotReady = () => {
+      setBotReady(true);
+      setJerryState('success'); // Bot ready → smile (agent speaking)
+    };
+    const handleBotDisconnected = () => {
+      setBotReady(false);
+      setJerryState('idle'); // Bot disconnected → sleeping
+    };
+    const handleError = () => {
+      setJerryState('error');
+    };
+
+    client.on(RTVIEvent.UserStartedSpeaking, handleUserStartedSpeaking);
+    client.on(RTVIEvent.UserStoppedSpeaking, handleUserStoppedSpeaking);
+    client.on(RTVIEvent.BotLlmStarted, handleBotLlmStarted);
+    client.on(RTVIEvent.LLMFunctionCallStarted, handleFunctionCallStarted);
+    client.on(RTVIEvent.BotTtsStarted, handleBotTtsStarted);
+    client.on(RTVIEvent.BotTtsStopped, handleBotTtsStopped);
+    client.on(RTVIEvent.BotReady, handleBotReady);
+    client.on(RTVIEvent.BotDisconnected, handleBotDisconnected);
+    client.on(RTVIEvent.Error, handleError);
+
+    return () => {
+      client.off(RTVIEvent.UserStartedSpeaking, handleUserStartedSpeaking);
+      client.off(RTVIEvent.UserStoppedSpeaking, handleUserStoppedSpeaking);
+      client.off(RTVIEvent.BotLlmStarted, handleBotLlmStarted);
+      client.off(RTVIEvent.LLMFunctionCallStarted, handleFunctionCallStarted);
+      client.off(RTVIEvent.BotTtsStarted, handleBotTtsStarted);
+      client.off(RTVIEvent.BotTtsStopped, handleBotTtsStopped);
+      client.off(RTVIEvent.BotReady, handleBotReady);
+      client.off(RTVIEvent.BotDisconnected, handleBotDisconnected);
+      client.off(RTVIEvent.Error, handleError);
+    };
+  }, [client, isRecording, botReady, isFirstResponse]);
+
   const toggleRecording = async () => {
     if (isRecording) {
       await stopRecording();
@@ -34,23 +100,25 @@ export const VoiceSessionCard = ({ userSub, client }: VoiceSessionCardProps) => 
   const startRecording = async () => {
     try {
       setIsLoading(true);
-      setStatus('Connecting...');
+      setStatus(UI_CONFIG.voiceSession.statusMessages.connecting);
+      setJerryState(UI_CONFIG.voiceSession.characterStates.idle); // Show sleepy face when turning on (until agent speaks)
+      setIsFirstResponse(true); // Reset first response flag
 
       if (!client) {
-        setStatus('Client not available');
+        setStatus(UI_CONFIG.voiceSession.statusMessages.clientNotAvailable);
         return;
       }
 
       await client.connect();
-      
+
       setIsConnected(true);
       setIsRecording(true);
-      setBtnLabel('Tap to end call');
-      setBtnHint('Listening...');
-      setStatus('Listening...');
+      setBtnLabel(UI_CONFIG.voiceSession.buttonLabels.endCall);
+      setBtnHint(UI_CONFIG.voiceSession.buttonHints.listening);
+      setStatus(UI_CONFIG.voiceSession.statusMessages.listening);
     } catch (err) {
       console.error(err);
-      setStatus('Failed');
+      setStatus(UI_CONFIG.voiceSession.statusMessages.failed);
     } finally {
       setIsLoading(false);
     }
@@ -60,12 +128,14 @@ export const VoiceSessionCard = ({ userSub, client }: VoiceSessionCardProps) => 
     try {
       if (!client) return;
 
+      setBotReady(false);
+      setJerryState(UI_CONFIG.voiceSession.characterStates.idle);
       await client.disconnect();
       setIsConnected(false);
       setIsRecording(false);
-      setStatus('Disconnected');
-      setBtnLabel('Tap to start call');
-      setBtnHint('Speak naturally');
+      setStatus(UI_CONFIG.voiceSession.statusMessages.disconnected);
+      setBtnLabel(UI_CONFIG.voiceSession.buttonLabels.startCall);
+      setBtnHint(UI_CONFIG.voiceSession.buttonHints.disconnected);
     } catch (err) {
       console.error(err);
     }
@@ -91,67 +161,94 @@ export const VoiceSessionCard = ({ userSub, client }: VoiceSessionCardProps) => 
   const responseText = '';
 
   return (
-    <section className="panel">
-      <div className="card">
-        <div className="card-kicker">Live Assistant</div>
-        <h2 className="card-title">Voice Session</h2>
-        <p className="card-copy">Tap the mic, speak your request, and Ram will guide the rest.</p>
-
-        <div className="voice-block">
-          <div className="btn-wrap" onClick={toggleRecording}>
-            <div className={`ring ring-1 ${isRecording ? 'active' : ''}`}></div>
-            <div className={`ring ring-2 ${isRecording ? 'active' : ''}`}></div>
-            <div className={`mic-btn ${isRecording ? 'active' : ''} ${isLoading ? 'loading' : ''}`}>
-              <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="#0f766e" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3z"/>
-                <path d="M19 10v2a7 7 0 0 1-14 0v-2"/>
-                <line x1="12" y1="19" x2="12" y2="22"/>
-              </svg>
-            </div>
-          </div>
-
-          <p className="btn-label">{btnLabel}</p>
-          <p className="btn-hint">{btnHint}</p>
-          <p className={`status ${status.includes('error') ? 'error' : status.includes('Connected') || status.includes('Listening') ? 'active' : ''}`}>
-            {status}
-          </p>
-         
-          {transcript && (
-            <p className="transcript">You: {transcript}</p>
-          )}
-          {responseText && (
-            <p className="response">AI: {responseText}</p>
-          )}
-        </div>
-
-        <div className="meetings-box">
-          <div className="meetings-title">
-            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="#0f766e" strokeWidth="2.5">
-              <circle cx="12" cy="12" r="10"/>
-              <polyline points="12 6 12 12 16 14"/>
-            </svg>
-            Recent Meetings
-          </div>
-          <div id="meetingsList">
-            {meetings.length === 0 ? (
-              <div className="no-meetings">No meetings scheduled yet</div>
-            ) : (
-              meetings.map((meeting, i) => (
-                <div key={i} className="meeting-row">
-                  <div className="meeting-dot"></div>
-                  <div className="meeting-info">
-                    <div className="meeting-name">{meeting.title}</div>
-                    <div className="meeting-meta">{meeting.name} · {meeting.date}</div>
-                  </div>
-                  <div className="meeting-time">{meeting.time}</div>
-                </div>
-              ))
-            )}
-          </div>
-        </div>
-
-        <p className="footer">Powered by Open Source Voice Stack · Google Calendar · Mistral 7B</p>
+    <div style={{
+      display: 'flex',
+      flexDirection: 'column',
+      alignItems: 'center',
+      justifyContent: 'center',
+      gap: '32px',
+      width: '100%',
+      maxWidth: '600px',
+    }}>
+      {/* Emoji Character */}
+      <div className="lottie-character" style={{width: '200px', height: '200px'}}>
+        <LottieCharacter state={jerryState} />
       </div>
-    </section>
+
+      {/* Status Text */}
+      <p style={{
+        fontSize: '1.25rem',
+        color: UI_CONFIG.colors.secondary,
+        textAlign: 'center',
+        minHeight: '24px',
+      }}>
+        {status || (jerryState === 'error' ? 'Error' : '')}
+      </p>
+
+      {/* Microphone Button */}
+      <div 
+        onClick={toggleRecording}
+        style={{
+          position: 'relative',
+          width: '100px',
+          height: '100px',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          cursor: 'pointer',
+        }}
+      >
+        {/* Animated Rings */}
+        <div style={{
+          position: 'absolute',
+          width: '100px',
+          height: '100px',
+          borderRadius: '50%',
+          border: '2px solid rgba(14, 165, 233, 0.3)',
+          opacity: isRecording ? 0.6 : 0,
+          animation: isRecording ? `pulse ${UI_CONFIG.animation.pulseDuration} ease-out infinite` : 'none',
+        }}></div>
+        <div style={{
+          position: 'absolute',
+          width: '80px',
+          height: '80px',
+          borderRadius: '50%',
+          border: '2px solid rgba(14, 165, 233, 0.4)',
+          opacity: isRecording ? 0.5 : 0,
+          animation: isRecording ? `pulse ${UI_CONFIG.animation.pulseDuration} ease-out infinite ${UI_CONFIG.animation.pulseDelay}` : 'none',
+        }}></div>
+        <div style={{
+          position: 'absolute',
+          width: '60px',
+          height: '60px',
+          borderRadius: '50%',
+          border: '2px solid rgba(14, 165, 233, 0.5)',
+          opacity: isRecording ? 0.4 : 0,
+          animation: isRecording ? `pulse ${UI_CONFIG.animation.pulseDuration} ease-out infinite 0.6s` : 'none',
+        }}></div>
+
+        {/* Main Button */}
+        <div style={{
+          width: '64px',
+          height: '64px',
+          borderRadius: '50%',
+          background: isRecording ? UI_CONFIG.colors.primary : 'white',
+          border: '3px solid white',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          boxShadow: `0 4px 20px ${UI_CONFIG.colors.primary}40`,
+          transition: 'all 0.3s ease',
+          cursor: 'pointer',
+          opacity: isLoading ? 0.5 : 1,
+        }}>
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke={isRecording ? 'white' : '#0ea5e9'} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3z"/>
+            <path d="M19 10v2a7 7 0 0 1-14 0v-2"/>
+            <line x1="12" y1="19" x2="12" y2="22"/>
+          </svg>
+        </div>
+      </div>
+    </div>
   );
 };

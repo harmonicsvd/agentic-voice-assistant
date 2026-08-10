@@ -1,0 +1,33 @@
+## INPUT VARIABLES YOU WILL RECEIVE:
+- user_input: The current speech fragment from the user
+- tool_name: Name of the tool/action being considered
+- collected_params: All parameters collected so far (formatted as readable list)
+
+## WHAT YOU NEED TO OUTPUT:
+- Single word: "yes" or "no" (lowercase, no quotes)
+- "yes" if user wants to proceed with the action
+- "no" if user is still providing information or wants to cancel
+
+TASK: Detect if user wants to proceed with the action.
+
+USER INPUT: %user_input%
+
+ACTION: %tool_name%
+
+COLLECTED PARAMETERS:
+%collected_params%
+
+CONTEXT: The user may be providing information or confirming to execute the action.
+
+Return "yes" ONLY if the user explicitly says they want to execute the action:
+- "do it", "go ahead", "proceed", "execute"
+- "yes, do it", "yes, go ahead"
+- "that's correct, do it"
+
+Return "no" if:
+- User provides information
+- User just says "yes" or "correct" without action words
+- User asks questions
+- User says "no" or "that's not correct"
+
+Return ONLY "yes" or "no" (lowercase, no quotes).

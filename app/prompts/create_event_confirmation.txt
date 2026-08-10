@@ -1,0 +1,107 @@
+## CONTEXT & FLOW AWARENESS:
+You are in a voice conversation system. Understanding the conversation state is CRITICAL:
+
+WHERE WE ARE IN THE FLOW:
+1. Tool detection identified the user wants to create/schedule a meeting
+2. Parameter extraction has gathered meeting details over multiple speech fragments
+3. NOW (this step): Determine if user wants to proceed with booking the meeting
+4. Next: If confirmed, execute the tool and book the meeting
+
+WHY YOU NEED THIS CONTEXT:
+- Users speak in fragments and may take multiple turns to provide all information
+- The system has been collecting meeting details incrementally
+- You need to decide if the user is ready to proceed or still providing information
+- This is a speech fragment - the user may be mid-confirmation or still adding details
+
+CURRENT SITUATION:
+- This is a speech fragment, not necessarily a complete confirmation
+- The system has been accumulating meeting details across conversation turns
+- User may be confirming, correcting, or still providing information
+- Meeting details collected so far: %collected_params%
+
+YOUR RESPONSIBILITY:
+- Analyze the current speech fragment in the context of the conversation
+- Distinguish between confirmation vs. information-providing vs. correction
+- Be conservative: if unsure, ask for clarification (return "no")
+- Consider the conversation flow: if user has been providing details in succession, wait for clear confirmation
+
+CONVERSATION STATE AWARENESS:
+- If user has been providing meeting details (time, mode, description) in recent turns, they may still be providing info
+- If user explicitly confirms ("yes", "book it", "proceed"), return "yes" if details are complete
+- If user is correcting ("actually it's...", "change it to..."), return "no" to allow correction
+- If user is adding more details ("also add...", "and the duration is..."), return "no" to allow completion
+- If user says "cancel", "don't book", "never mind", return "no" regardless of state
+
+## INPUT VARIABLES YOU WILL RECEIVE:
+- user_input: The current speech fragment from the user
+- collected_params: All meeting details collected so far (formatted as readable list)
+- previous_questions: What the bot asked the user in the previous turn (e.g., "Should I book that for you?")
+- date_status: Whether date is present ("PRESENT" or "MISSING")
+- time_status: Whether time is present ("PRESENT" or "MISSING")
+- meeting_mode_status: Whether meeting mode is present ("PRESENT" or "MISSING")
+- name_status: Whether name is present ("PRESENT" or "MISSING")
+- description_status: Whether description is present ("PRESENT" or "MISSING")
+- duration_status: Whether duration is present ("PRESENT" or "MISSING")
+- all_required_present: Whether all required fields are present ("True" or "False")
+
+## WHAT YOU NEED TO OUTPUT:
+- Single word: "yes" or "no" (lowercase, no quotes)
+- "yes" if user wants to proceed with booking
+- "no" if user is still providing information or wants to cancel
+
+TASK: Intelligently determine if user wants to proceed with booking this meeting.
+
+USER INPUT: %user_input%
+
+BOT'S PREVIOUS QUESTION:
+%previous_questions%
+
+COLLECTED MEETING DETAILS:
+%collected_params%
+
+REQUIRED FIELDS STATUS:
+- Date: %date_status%
+- Time: %time_status%
+- Meeting Mode: %meeting_mode_status%
+- Name: %name_status%
+
+OPTIONAL FIELDS STATUS:
+- Description: %description_status%
+- Duration: %duration_status%
+
+ALL REQUIRED FIELDS PRESENT: %all_required_present%
+
+YOUR DECISION LOGIC:
+
+Step 1: Check if all required fields (date, time, meeting_mode, name) are present
+- If NOT all required fields present: The user is likely still providing information → Return "no"
+- If all required fields present: Continue to Step 2
+
+Step 2: Analyze user's intent from their input
+- IMPORTANT: Look at the BOT'S PREVIOUS QUESTION - the user is responding to that specific question
+- If bot asked "Should I book that for you?" and user says "yes" → Return "yes"
+- If bot asked "Should I book that for you?" and user says "no" → Return "no"
+- If bot asked "Should I book that for you?" and user provides more details → Return "no"
+
+- User wants to proceed if they say:
+  * "yes", "correct", "that's right", "sounds good", "perfect"
+  * "book it", "schedule it", "create it", "do it", "go ahead", "proceed"
+  * "nothing just book it", "just book it", "book it now"
+  * "yes, go ahead", "yes, book it", "yes, do it"
+  * "that's correct, book it", "that's right, do it"
+
+- User is providing more information if they say:
+  * Specific details: "it's online", "at 3pm", "with Alex", "location is..."
+  * Corrections: "actually it's...", "change it to...", "not 3pm but..."
+  * Additions: "also add...", "and the duration is..."
+
+- User wants to cancel/correct if they say:
+  * "no", "that's not correct", "that's wrong", "cancel it", "don't book"
+
+Step 3: Make final decision
+- If (all required fields present) AND (user wants to proceed) → Return "yes"
+- If (all required fields present) AND (user wants to cancel) → Return "no"
+- If (required fields missing) AND (user providing information) → Return "no"
+- If (required fields missing) AND (user says proceed anyway) → Return "yes" (user chooses to proceed incomplete)
+
+Return ONLY "yes" or "no" (lowercase, no quotes).

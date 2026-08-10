@@ -9,38 +9,36 @@ from fastapi.staticfiles import StaticFiles
 from pathlib import Path
 from fastapi.responses import JSONResponse, Response, RedirectResponse, FileResponse
 
-from app.config import settings
+from app.config.config import settings
 from app.google_clients import get_calendar_service, build_oauth
-from app.stt import transcribe_audio_bytes
 
-from app.orchestration import VoiceOrchestrator
+
+
 
 from pydantic import BaseModel, Field, ValidationError
 from typing import Literal, Any
 
-from app.db import init_db, get_db, db_execute
+from app.db.db import init_db, get_db, db_execute, using_postgres
 from uuid import uuid4
 
 from datetime import datetime, timedelta, timezone
 import httpx
 import time
-from app.Vad import VoiceActivityDetector
-from app.streaming_main import streaming_handler
+
 
 import re
 from typing import Optional
 from fastapi.middleware.cors import CORSMiddleware
 from starlette.middleware.sessions import SessionMiddleware
 
-from app.pipecat_websocket import pipecat_websocket_handler
+from app.agents.pipecat_websocket import pipecat_websocket_handler
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Initialize persistent resources once at process startup."""
     init_db()   # runs once when server starts
 
-    # Initialize voice orchestrator
-    app.state.voice_orchestrator = VoiceOrchestrator()
+   
 
 
     yield       # app serves requests here
@@ -87,162 +85,6 @@ class ProfileUpdate(BaseModel):
     commute_mode: str = Field(min_length=2, max_length=40)
     risk_tolerance: str = Field(min_length=2, max_length=20)
     ppe_required: bool = False
-
-
-class CreateEventArguments(BaseModel):
-    """Arguments expected from VAPI create-event tool call."""
-    name: str = Field(min_length=1)
-    date: str
-    time: str
-    title: str = "Meeting"
-    duration: str = "1 hour"
-    meeting_mode: Literal["online", "in_person"]
-    location: str | None = None
-    city: str | None = None
-    user_sub: str | None = None
-
-
-class CreateEventFunctionPayload(BaseModel):
-    """Wrapper for tool call `function.arguments` payload."""
-    arguments: Any
-
-
-class CreateEventToolCall(BaseModel):
-    """Single tool call item from VAPI message envelope."""
-    id: str
-    function: CreateEventFunctionPayload
-
-
-class CreateEventMessage(BaseModel):
-    """VAPI message envelope containing one or more tool calls."""
-    toolCalls: list[CreateEventToolCall] = Field(default_factory=list)
-
-
-class CreateEventRequest(BaseModel):
-    """Top-level create-event webhook body contract."""
-    message: CreateEventMessage
-    
-def _parse_create_event_arguments(raw_arguments: dict) -> CreateEventArguments:
-    """Support Pydantic v1/v2 parsing with one compatibility helper."""
-    if hasattr(CreateEventArguments, "model_validate"):
-        return CreateEventArguments.model_validate(raw_arguments)
-    return CreateEventArguments.parse_obj(raw_arguments)
-
-
-class MeetingsSummaryArguments(BaseModel):
-    """Arguments expected from VAPI meetings-summary tool call."""
-    user_sub: str | None = None
-    date: str | None = None  # YYYY-MM-DD
-    timezone: str = "Europe/Berlin"
-
-
-def _parse_meetings_summary_arguments(raw_arguments: dict) -> MeetingsSummaryArguments:
-    """Support Pydantic v1/v2 parsing for meetings-summary arguments."""
-    if hasattr(MeetingsSummaryArguments, "model_validate"):
-        return MeetingsSummaryArguments.model_validate(raw_arguments)
-    return MeetingsSummaryArguments.parse_obj(raw_arguments)
-
-
-def _extract_user_sub(raw_payload: dict, explicit_sub: str | None) -> str | None:
-    """
-    Resolve `user_sub` from explicit args or common VAPI override locations.
-
-    Keeps backend resilient to slight payload-shape differences between
-    dashboard tool tests, live calls, and SDK wrapper variants.
-    """
-    # Priority 1: explicit argument from parsed tool input.
-    candidate = (explicit_sub or "").strip()
-    if candidate:
-        return candidate
-
-    # Priority 2: common VAPI override/metadata locations.
-    direct_paths = [
-        raw_payload.get("user_sub"),
-        (((raw_payload.get("assistantOverrides") or {}).get("variableValues") or {}).get("user_sub")),
-        (((raw_payload.get("assistant_overrides") or {}).get("variable_values") or {}).get("user_sub")),
-        (((raw_payload.get("message") or {}).get("assistantOverrides") or {}).get("variableValues", {}).get("user_sub")),
-        (((raw_payload.get("call") or {}).get("assistantOverrides") or {}).get("variableValues", {}).get("user_sub")),
-        (((raw_payload.get("call") or {}).get("assistantOverrides") or {}).get("metadata", {}).get("user_sub")),
-        (((raw_payload.get("assistantOverrides") or {}).get("metadata") or {}).get("user_sub")),
-    ]
-    for value in direct_paths:
-        if isinstance(value, str) and value.strip():
-            return value.strip()
-
-    # Priority 3: deep recursive search as final fallback for payload variants.
-    def _walk(value: Any) -> str | None:
-        """Recursively search nested dict/list payloads for any `user_sub` field."""
-        if isinstance(value, dict):
-            maybe = value.get("user_sub")
-            if isinstance(maybe, str) and maybe.strip():
-                return maybe.strip()
-            for nested in value.values():
-                found = _walk(nested)
-                if found:
-                    return found
-        elif isinstance(value, list):
-            for nested in value:
-                found = _walk(nested)
-                if found:
-                    return found
-        return None
-
-    return _walk(raw_payload)
-
-
-async def _fetch_meetings_summary_from_weather_agent(
-    *,
-    user_sub: str,
-    target_date: str | None,
-    timezone_name: str,
-) -> dict[str, Any]:
-    """
-    Call Sham (`weather-agent`) internal summary endpoint and validate its contract.
-
-    This function is the cross-service boundary between voice backend and
-    weather reasoning backend.
-    """
-    # Ram handles the employee request; Sham owns weather reasoning.
-    if not settings.weather_agent_base_url:
-        raise RuntimeError("WEATHER_AGENT_BASE_URL is not configured.")
-    if not settings.weather_agent_internal_api_key:
-        raise RuntimeError("WEATHER_AGENT_INTERNAL_API_KEY is not configured.")
-
-    params: dict[str, str] = {
-        "user_sub": user_sub,
-        "tz": timezone_name,
-    }
-    if target_date:
-        params["date"] = target_date
-    started = time.perf_counter()
-    status_code: int | None = None
-    try:
-        async with httpx.AsyncClient(timeout=settings.weather_agent_timeout_seconds) as client:
-            response = await client.get(
-                f"{settings.weather_agent_base_url}/internal/meeting-weather-summary",
-                params=params,
-                headers={"X-Internal-API-Key": settings.weather_agent_internal_api_key},
-            )
-            status_code = response.status_code
-            response.raise_for_status()
-            payload = response.json()
-
-        if not isinstance(payload, dict):
-            raise RuntimeError("Weather agent returned invalid summary payload.")
-        if "summary_text" not in payload:
-            raise RuntimeError("Weather agent response missing summary_text.")
-        return payload
-    finally:
-        elapsed_ms = (time.perf_counter() - started) * 1000
-        logger.info(
-            "weather_delegate_done user_sub=%s date=%s tz=%s status=%s elapsed_ms=%.1f timeout_s=%.1f",
-            user_sub,
-            target_date,
-            timezone_name,
-            status_code,
-            elapsed_ms,
-            settings.weather_agent_timeout_seconds,
-        )
 
 
 @app.get("/login")
@@ -305,37 +147,77 @@ async def put_profile(payload: ProfileUpdate, request: Request):
 
     updated_at = datetime.now(timezone.utc).isoformat()
 
-    with get_db() as conn:
-        db_execute(
-            conn,
-            """
-            INSERT INTO user_profiles (
-                sub, email, default_city, timezone, role, commute_mode,
-                ppe_required, risk_tolerance, updated_at
-            )
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
-            ON CONFLICT(sub) DO UPDATE SET
-                email = excluded.email,
-                default_city = excluded.default_city,
-                timezone = excluded.timezone,
-                role = excluded.role,
-                commute_mode = excluded.commute_mode,
-                ppe_required = excluded.ppe_required,
-                risk_tolerance = excluded.risk_tolerance,
-                updated_at = excluded.updated_at
-            """,
-            (
-                user["sub"],
-                user.get("email", ""),
-                payload.default_city.strip(),
-                payload.timezone.strip(),
-                payload.role.strip(),
-                payload.commute_mode.strip(),
-                payload.ppe_required,
-                payload.risk_tolerance.strip(),
-                updated_at,
-            ),
-        )
+    try:
+        with get_db() as conn:
+            # Get existing refresh token to preserve it
+            existing = db_execute(
+                conn,
+                "SELECT google_refresh_token FROM user_profiles WHERE sub = %s",
+                (user["sub"],)
+            ).fetchone()
+            existing_refresh_token = existing["google_refresh_token"] if existing else None
+            
+            # Use different upsert syntax based on database type
+            if using_postgres():
+                db_execute(
+                    conn,
+                    """
+                    INSERT INTO user_profiles (
+                        sub, email, default_city, timezone, role, commute_mode,
+                        ppe_required, risk_tolerance, google_refresh_token, updated_at
+                    )
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    ON CONFLICT(sub) DO UPDATE SET
+                        email = excluded.email,
+                        default_city = excluded.default_city,
+                        timezone = excluded.timezone,
+                        role = excluded.role,
+                        commute_mode = excluded.commute_mode,
+                        ppe_required = excluded.ppe_required,
+                        risk_tolerance = excluded.risk_tolerance,
+                        google_refresh_token = COALESCE(excluded.google_refresh_token, user_profiles.google_refresh_token),
+                        updated_at = excluded.updated_at
+                    """,
+                    (
+                        user["sub"],
+                        user.get("email", ""),
+                        payload.default_city.strip(),
+                        payload.timezone.strip(),
+                        payload.role.strip(),
+                        payload.commute_mode.strip(),
+                        payload.ppe_required,
+                        payload.risk_tolerance.strip(),
+                        existing_refresh_token,
+                        updated_at,
+                    ),
+                )
+            else:
+                # SQLite: Use INSERT OR REPLACE (upsert)
+                db_execute(
+                    conn,
+                    """
+                    INSERT OR REPLACE INTO user_profiles (
+                        sub, email, default_city, timezone, role, commute_mode,
+                        ppe_required, risk_tolerance, google_refresh_token, updated_at
+                    )
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        user["sub"],
+                        user.get("email", ""),
+                        payload.default_city.strip(),
+                        payload.timezone.strip(),
+                        payload.role.strip(),
+                        payload.commute_mode.strip(),
+                        payload.ppe_required,
+                        payload.risk_tolerance.strip(),
+                        existing_refresh_token,
+                        updated_at,
+                    ),
+                )
+    except Exception as e:
+        logger.error(f"Failed to save profile: {e}")
+        return JSONResponse({"error": str(e)}, status_code=500)
 
     return {"ok": True}
 
@@ -352,7 +234,6 @@ async def get_internal_profile(
     sub: str,
     x_internal_api_key: str | None = Header(default=None),
 ):
-    """Internal endpoint for backend callers to fetch profile by Google `sub`."""
     err = require_internal_api_key(x_internal_api_key)
     if err:
         return err
@@ -361,7 +242,7 @@ async def get_internal_profile(
         row = db_execute(
             conn,
             """
-            SELECT sub, email, default_city, timezone, role, commute_mode, ppe_required, risk_tolerance, updated_at
+            SELECT sub, email, default_city, timezone, role, commute_mode, ppe_required, risk_tolerance, google_refresh_token, updated_at
             FROM user_profiles
             WHERE sub = %s
             """,
@@ -373,30 +254,6 @@ async def get_internal_profile(
 
     return {"profile": dict(row)}
 
-def parse_duration_to_minutes(duration_str):
-    """Convert natural duration text into integer minutes."""
-    duration_str = duration_str.lower()
-    
-    # Convert word numbers to digits 
-    word_to_num = {
-        "one": "1", "two": "2", "three": "3", "four": "4",
-        "half": "30 min", "thirty": "30", "forty five": "45",
-        "twenty": "20", "fifteen": "15", "ninety": "90"
-    }
-    
-    for word, num in word_to_num.items():
-        duration_str = duration_str.replace(word, num)
-    
-    hours = re.search(r'(\d+\.?\d*)\s*hour', duration_str)
-    minutes = re.search(r'(\d+)\s*min', duration_str)
-    
-    total_minutes = 0
-    if hours:
-        total_minutes += float(hours.group(1)) * 60
-    if minutes:
-        total_minutes += int(minutes.group(1))
-    
-    return int(total_minutes) if total_minutes > 0 else 60  # default 60 mins
 
 
 def _derive_city_from_location(location: str | None) -> str | None:
@@ -433,13 +290,6 @@ def _derive_city_from_location(location: str | None) -> str | None:
 
 
 
-@app.get("/vapi-key")
-async def get_vapi_key():
-    """Return public VAPI key used by browser client."""
-    return JSONResponse(content={
-        "apiKey": settings.vapi_public_key
-    })
-
 @app.get("/")
 def root():
     """Default root route redirects users to login."""
@@ -464,320 +314,59 @@ def health_head():
     return Response(status_code=200)
 
 
-@app.post("/stt/transcribe")
-async def transcribe_audio(
-    request: Request,
-    file: UploadFile = File(...),
-):
-    """Transcribe browser-recorded audio with local Whisper."""
-    user, error = get_current_user_or_401(request)
-    if error:
-        return error
 
-    file_bytes = await file.read()
-    if not file_bytes:
-        return JSONResponse({"error": "Audio file is empty"}, status_code=400)
-
-    suffix = Path(file.filename or "audio.webm").suffix or ".webm"
-
-    try:
-        transcript = transcribe_audio_bytes(file_bytes, suffix=suffix)
-    except RuntimeError as exc:
-        logger.error("local_stt_not_available error=%s", exc)
-        return JSONResponse({"error": str(exc)}, status_code=500)
-    except Exception as exc:
-        logger.exception("local_stt_transcription_failed")
-        return JSONResponse({"error": f"Transcription failed: {exc}"}, status_code=500)
-
-    logger.info(
-        "local_stt_transcribed user_sub=%s filename=%s size_bytes=%s chars=%s",
-        user["sub"],
-        file.filename,
-        len(file_bytes),
-        len(transcript),
-    )
-    return {"transcript": transcript}
-
-@app.websocket("/ws/stt")
-async def stt_websocket(websocket: WebSocket):
-    """Receive browser audio chunks over WebSocket with VAD-based speech detection."""
-    await websocket.accept()
-
-    audio_chunks: list[bytes] = []
-    suffix = ".webm"
-    
-    # Initialize VAD
-    vad = VoiceActivityDetector(aggressiveness=3, sample_rate=16000, frame_duration_ms=30)
-    speech_detected = False
-
-    try:
-        while True:
-            message = await websocket.receive()
-
-            if "bytes" in message and message["bytes"] is not None:
-                audio_data = message["bytes"]
-                audio_chunks.append(audio_data)
-                
-                # Process with VAD
-                vad_result = vad.process_frame(audio_data)
-                
-                if vad_result == "speech":
-                    if not speech_detected:
-                        speech_detected = True
-                        await websocket.send_json({
-                            "type": "speech_started",
-                        })
-                    await websocket.send_json({
-                        "type": "chunk_received",
-                        "chunks": len(audio_chunks),
-                    })
-                elif vad_result == "speech_ended":
-                    # Speech ended, trigger transcription
-                    if audio_chunks:
-                        await websocket.send_json({"type": "transcribing"})
-                        
-                        audio_bytes = b"".join(audio_chunks)
-                        transcript = transcribe_audio_bytes(audio_bytes, suffix=suffix)
-                        
-                        await websocket.send_json({
-                            "type": "transcript",
-                            "transcript": transcript,
-                        })
-                        
-                        # Reset for next utterance
-                        audio_chunks.clear()
-                        vad.reset()
-                        speech_detected = False
-                # Silence - keep collecting but don't notify
-                continue
-
-            if "text" in message and message["text"]:
-                payload = json.loads(message["text"])
-
-                if payload.get("type") == "start":
-                    suffix = payload.get("suffix") or ".webm"
-                    audio_chunks.clear()
-                    vad.reset()
-                    speech_detected = False
-                    await websocket.send_json({"type": "started"})
-                    continue
-
-                if payload.get("type") == "stop":
-                    # Manual stop - transcribe whatever we have
-                    if audio_chunks:
-                        await websocket.send_json({"type": "transcribing"})
-                        
-                        audio_bytes = b"".join(audio_chunks)
-                        transcript = transcribe_audio_bytes(audio_bytes, suffix=suffix)
-                        
-                        await websocket.send_json({
-                            "type": "transcript",
-                            "transcript": transcript,
-                        })
-                        audio_chunks.clear()
-                        vad.reset()
-                        speech_detected = False
-                    continue
-
-                await websocket.send_json({
-                    "type": "error",
-                    "error": "Unknown message type",
-                })
-
-    except WebSocketDisconnect:
-        logger.info("stt_websocket_disconnected chunks=%s", len(audio_chunks))
-    except Exception as exc:
-        logger.exception("stt_websocket_failed")
-        await websocket.send_json({
-            "type": "error",
-            "error": str(exc),
-        })
 
 
 @app.websocket("/ws/pipecat")
 async def pipecat_websocket(websocket: WebSocket):
     """WebSocket endpoint for Pipecat real-time voice pipeline."""
     await pipecat_websocket_handler(websocket)
+
+
+def _list_events_payload(from_iso: str, to_iso: str, user_sub: str | None = None) -> dict:
+    """Unified event reader used by both public `/events` and internal `/internal/events`."""
     
-   
-@app.post("/create-event")
-async def create_event(
-    request: Request,
-    x_internal_api_key: str | None = Header(default=None),
-):
-    """
-    VAPI tool webhook endpoint.
-    Accepts tool-call payload, validates args, resolves weather city metadata,
-    and creates a Google Calendar event.
-    """
-    raw_payload = await request.json()
-    message_preview = raw_payload.get("message") or {}
-    tool_calls_preview = message_preview.get("toolCalls") or message_preview.get("tool_calls") or []
-    print(
-        "Received /create-event webhook: "
-        f"tool_calls={len(tool_calls_preview)} "
-        f"has_assistant_overrides={bool(raw_payload.get('assistantOverrides'))}"
-    )
-
-    try:
-        message = raw_payload.get("message") or {}
-        tool_calls = message.get("toolCalls") or message.get("tool_calls") or []
-        if not tool_calls:
-            return JSONResponse(
-                content={"error": "No tool calls found"},
-                status_code=400
-            )
-
-        tool_call = tool_calls[0] or {}
-        function_payload = tool_call.get("function") or {}
-        raw_arguments = function_payload.get("arguments")
-        if isinstance(raw_arguments, str):
-            raw_arguments = json.loads(raw_arguments)
-        if not isinstance(raw_arguments, dict):
-            return JSONResponse(
-                content={"error": "Invalid function.arguments payload"},
-                status_code=400,
-            )
-        arguments = _parse_create_event_arguments(raw_arguments)
-
-        # Web browser flow: session-authenticated user.
-        # VAPI server-to-server flow: internal API key + user_sub in payload.
-        user, _ = get_current_user_or_401(request)
-        if not user:
-            internal_err = require_internal_api_key(x_internal_api_key)
-            if internal_err:
-                return JSONResponse({"error": "authentication required"}, status_code=401)
-
-        name = (arguments.name or "").strip()
-        date = (arguments.date or "").strip()
-        time = (arguments.time or "").strip()
-        title = (arguments.title or "").strip() or "Meeting"
-        duration = (arguments.duration or "").strip() or "1 hour"
-        meeting_mode = arguments.meeting_mode
-        requested_city = (arguments.city or "").strip() or None
-        caller_sub = user.get("sub") if user else _extract_user_sub(raw_payload, arguments.user_sub)
-        location = (arguments.location or "").strip() or None
-
-        if not name:
-            return JSONResponse(content={"error": "name is required"}, status_code=400)
-        if not date:
-            return JSONResponse(content={"error": "date is required"}, status_code=400)
-        if not time:
-            return JSONResponse(content={"error": "time is required"}, status_code=400)
-        if not caller_sub:
-            return JSONResponse(
-                content={
-                    "error": "user_sub is required for server-to-server calls",
-                    "hint": "Pass assistantOverrides.variableValues.user_sub and map tool arg user_sub to {{user_sub}}",
-                },
-                status_code=400,
-            )
-
-        resolved_city = None
-        city_source = None
-
-        if meeting_mode == "in_person":
-            if requested_city:
-                resolved_city = requested_city
-                city_source = "provided"
+    # Get user's refresh token if user_sub is provided
+    refresh_token = None
+    calendar_id = settings.calendar_id
+    
+    if user_sub:
+        try:
+            profile = _get_profile_row(user_sub)
+            if profile:
+                # sqlite3.Row object - access by column name directly
+                refresh_token = profile["google_refresh_token"] if profile and "google_refresh_token" in profile.keys() else None
+                calendar_id = "primary"  # Use user's primary calendar
+                logger.info(f"📅 _list_events_payload: user_sub={user_sub}, has_refresh_token={bool(refresh_token)}")
             else:
-                profile_city = _lookup_profile_city(caller_sub)
-                if profile_city:
-                    resolved_city = profile_city
-                    city_source = "profile_default"
-                else:
-                    return JSONResponse(
-                        content={"error": "city is required for in-person meetings (or set default city in profile)"},
-                        status_code=400,
-                    )
-
-
-        print(f"Creating event for: {name}, {date}, {time}, {title}, {duration}")
-
-        # Parse date and time
-        event_datetime_str = f"{date} {time}"
-        event_start = datetime.strptime(event_datetime_str, "%Y-%m-%d %H:%M")
-        
-        # Get user timezone from profile
-        user_timezone = _lookup_profile_timezone(caller_sub) or "Europe/Berlin"
-
-        # Parse duration naturally
-        duration_minutes = parse_duration_to_minutes(duration)
-        event_end = event_start + timedelta(minutes=duration_minutes)
-
-        print(f"Duration: {duration_minutes} minutes")
-
-        # Create Google Calendar event
-        service = get_calendar_service()
-        metadata_parts = [
-            f"meeting_mode:{meeting_mode}",
-        ]
-        if caller_sub:
-            metadata_parts.append(f"user_sub:{caller_sub}")
-        if resolved_city:
-            metadata_parts.append(f"weather_city:{resolved_city}")
-        if city_source:
-            metadata_parts.append(f"city_source:{city_source}")
-
-        event = {
-            'summary': title,
-            'description': (
-                f"Scheduled by {name} via Ram Voice Scheduling Agent. "
-                f"{'; '.join(metadata_parts)}"
-            ),
-
-            'start': {
-                'dateTime': event_start.isoformat(),
-                'timeZone': user_timezone,
-            },
-            'end': {
-                'dateTime': event_end.isoformat(),
-                'timeZone': user_timezone,
-            },
-        }
-        if location:
-            event["location"] = location
-            
-        created_event = service.events().insert(
-            calendarId=settings.calendar_id,
-            body=event
-        ).execute()
-
-        print(f"Event created: {created_event.get('htmlLink')}")
-
-        return JSONResponse(content={
-            "results": [{
-                "toolCallId": tool_call.get("id", ""),
-                "result": f"Calendar event '{title}' has been successfully created for {name} on {date} at {time} for {duration}."
-            }]
-        })
-
-    except ValidationError as e:
-        return JSONResponse(
-            content={"error": "invalid create-event arguments", "details": e.errors()},
-            status_code=422,
+                logger.warning(f"📅 _list_events_payload: no profile found for user_sub={user_sub}")
+        except Exception as e:
+            logger.error(f"📅 _list_events_payload: error getting profile: {e}")
+    
+    try:
+        service = get_calendar_service(refresh_token=refresh_token)
+    except Exception as e:
+        logger.error(f"📅 _list_events_payload: error getting calendar service: {e}")
+        # Fall back to shared calendar if user token fails
+        service = get_calendar_service(refresh_token=None)
+        calendar_id = settings.calendar_id
+        logger.info("📅 _list_events_payload: falling back to shared calendar")
+    
+    try:
+        response = (
+            service.events()
+            .list(
+                calendarId=calendar_id,
+                timeMin=from_iso,
+                timeMax=to_iso,
+                singleEvents=True,
+                orderBy="startTime",
+            )
+            .execute()
         )
     except Exception as e:
-        print("Error:", e)
-        return JSONResponse(
-            content={"error": str(e)},
-            status_code=500
-        )
-
-def _list_events_payload(from_iso: str, to_iso: str) -> dict:
-    """Unified event reader used by both public `/events` and internal `/internal/events`."""
-    service = get_calendar_service()
-    response = (
-        service.events()
-        .list(
-            calendarId=settings.calendar_id,
-            timeMin=from_iso,
-            timeMax=to_iso,
-            singleEvents=True,
-            orderBy="startTime",
-        )
-        .execute()
-    )
+        logger.error(f"📅 _list_events_payload: error listing events: {e}")
+        return {"events": []}
 
     items = response.get("items", [])
     events = []
@@ -787,8 +376,8 @@ def _list_events_payload(from_iso: str, to_iso: str) -> dict:
         location = e.get("location")
         description_raw = e.get("description") or ""
         description = description_raw.lower()
-        user_sub_match = re.search(r"\buser_sub:([0-9]+)\b", description_raw)
-        user_sub = user_sub_match.group(1) if user_sub_match else None
+        
+        # Remove user_sub extraction since we're using per-user calendars
         weather_city_match = re.search(r"\bweather_city:([^;]+)", description_raw)
         weather_city = weather_city_match.group(1).strip() if weather_city_match else None
         city_source_match = re.search(r"\bcity_source:([^;]+)", description_raw)
@@ -830,38 +419,23 @@ def _list_events_payload(from_iso: str, to_iso: str) -> dict:
                 "start": start,
                 "end": end,
                 "location": location,
+                "description": description_raw,
                 "city": weather_city,
                 "city_source": city_source,
                 "meeting_mode": meeting_mode,
                 "is_virtual": is_virtual,
-                "user_sub": user_sub,
             }
         )
 
     return {"events": events}
 
 
-@app.get("/events")
-async def list_events(
-    request: Request,
-    from_iso: str = Query(..., description="ISO start datetime"),
-    to_iso: str = Query(..., description="ISO end datetime"),
-):
-    """Browser-authenticated calendar listing endpoint."""
-    user, error = get_current_user_or_401(request)
-    if error:
-        return error
-
-    try:
-        return _list_events_payload(from_iso, to_iso)
-    except Exception as e:
-        return JSONResponse(content={"error": str(e)}, status_code=500)
-
-
+# Internal endpoints for weather-agent integration
 @app.get("/internal/events")
 async def list_events_internal(
     from_iso: str = Query(..., description="ISO start datetime"),
     to_iso: str = Query(..., description="ISO end datetime"),
+    user_sub: str | None = Query(default=None, description="Filter by user sub"),
     x_internal_api_key: str | None = Header(default=None),
 ):
     """Internal calendar listing endpoint for backend callers."""
@@ -870,249 +444,21 @@ async def list_events_internal(
         return err
 
     try:
-        return _list_events_payload(from_iso, to_iso)
+        return _list_events_payload(from_iso, to_iso, user_sub=user_sub)
     except Exception as e:
         return JSONResponse(content={"error": str(e)}, status_code=500)
-
-
-@app.post("/meetings-weather-summary")
-async def meetings_weather_summary(
-    request: Request,
-    x_internal_api_key: str | None = Header(default=None),
-):
-    """
-    VAPI tool endpoint for "what are my meetings" requests.
-    Ram receives the voice tool call and delegates summary generation to Sham.
-    """
-    raw_payload = await request.json()
-    req_started = time.perf_counter()
-    try:
-        message = raw_payload.get("message") or {}
-        tool_calls = message.get("toolCalls") or message.get("tool_calls") or []
-        tool_call_id = ""
-
-        if tool_calls:
-            tool_call = tool_calls[0] or {}
-            tool_call_id = tool_call.get("id", "")
-            function_payload = tool_call.get("function") or {}
-            raw_arguments = function_payload.get("arguments") or {}
-        else:
-            # Allow direct JSON body for local/manual testing without VAPI wrapper.
-            raw_arguments = raw_payload
-
-        if isinstance(raw_arguments, str):
-            raw_arguments = json.loads(raw_arguments)
-
-        if not isinstance(raw_arguments, dict):
-            return JSONResponse(
-                content={"error": "Invalid arguments payload"},
-                status_code=400,
-            )
-
-        arguments = _parse_meetings_summary_arguments(raw_arguments)
-
-        user, _ = get_current_user_or_401(request)
-        if user:
-            caller_sub = user.get("sub")
-        else:
-            internal_err = require_internal_api_key(x_internal_api_key)
-            if internal_err:
-                return JSONResponse({"error": "authentication required"}, status_code=401)
-            caller_sub = _extract_user_sub(raw_payload, arguments.user_sub)
-
-        if not caller_sub:
-            return JSONResponse(
-                content={
-                    "error": "user_sub is required for server-to-server calls",
-                    "hint": "Pass assistantOverrides.variableValues.user_sub and map tool arg user_sub to {{user_sub}}",
-                },
-                status_code=400,
-            )
-
-        summary = await _fetch_meetings_summary_from_weather_agent(
-            user_sub=caller_sub,
-            target_date=arguments.date,
-            timezone_name=arguments.timezone,
-        )
-
-        if tool_call_id:
-            return JSONResponse(
-                content={
-                    "results": [
-                        {
-                            "toolCallId": tool_call_id,
-                            "result": summary["summary_text"],
-                        }
-                    ],
-                    "data": summary,
-                }
-            )
-
-        return JSONResponse(content=summary)
-    
-
-    except ValueError as e:
-        return JSONResponse(content={"error": str(e)}, status_code=400)
-    except Exception as e:
-        return JSONResponse(content={"error": str(e)}, status_code=500)
-    finally:
-         total_ms = (time.perf_counter() - req_started) * 1000
-         logger.info("meetings_weather_summary_done elapsed_ms=%.1f", total_ms)
-
-
-@app.get("/internal/meetings-weather-summary")
-async def meetings_weather_summary_internal(
-    user_sub: str = Query(..., description="Google user sub"),
-    date: str | None = Query(default=None, description="YYYY-MM-DD"),
-    tz: str = Query(default="Europe/Berlin", description="IANA timezone"),
-    x_internal_api_key: str | None = Header(default=None),
-):
-    """Internal pass-through summary endpoint for trusted backend consumers."""
-    err = require_internal_api_key(x_internal_api_key)
-    if err:
-        return err
-
-    try:
-        return await _fetch_meetings_summary_from_weather_agent(
-            user_sub=user_sub,
-            target_date=date,
-            timezone_name=tz,
-        )
-    except ValueError as e:
-        return JSONResponse(content={"error": str(e)}, status_code=400)
-    except Exception as e:
-        return JSONResponse(content={"error": str(e)}, status_code=500)
-
-@app.post("/voice/process")
-async def process_voice(
-    request: Request,
-    x_internal_api_key: str = Header(default=None)
-):
-    """Process voice input and return audio response with session management."""
-    # Verify API key
-    if not x_internal_api_key or not hmac.compare_digest(x_internal_api_key, settings.internal_api_key):
-        return JSONResponse({"error": "Unauthorized"}, status_code=401)
-    
-    # Get audio data
-    audio_bytes = await request.body()
-    
-    # Get session_id from query parameter or header
-    session_id = request.query_params.get("session_id") or request.headers.get("X-Session-ID")
-    
-    # Get user_sub from header
-    user_sub = request.headers.get("X-User-Sub")
-    
-    # Run pipeline with session
-    orchestrator = request.app.state.voice_orchestrator
-    output_audio = orchestrator.run_pipeline(audio_bytes, user_sub=user_sub, session_id=session_id)
-    
-    # Return WAV audio
-    return Response(
-        content=output_audio,
-        media_type="audio/wav",
-        headers={
-            "Content-Disposition": "attachment; filename=response.wav",
-            "X-Session-ID": session_id or "default"
-        }
-    )
-
-
-@app.websocket("/voice/ws")
-async def voice_websocket(websocket: WebSocket):
-    """WebSocket endpoint for real-time voice streaming with VAD and full pipeline."""
-    await websocket.accept()
-    
-    # Get session info
-    session_id = websocket.query_params.get("session_id", "default")
-    user_sub = websocket.query_params.get("user_sub", "")
-    
-    print(f"WebSocket connected: session_id={session_id}, user_sub={user_sub}")
-    
-    is_processing = False
-
-    orchestrator = request.app.state.voice_orchestrator
-    
-    try:
-        # Greeting disabled for now - frontend not handling pre-user audio
-        # greeting = "Hello, I'm your voice assistant. How can I help you today?"
-        # print("Sending greeting...")
-        # for chunk in orchestrator.synthesize_speech_streaming(greeting):
-        #     await websocket.send_bytes(chunk)
-        
-        while True:
-            try:
-                message = await websocket.receive()
-                print(f"Received message type: {message.get('type')}, has bytes: {'bytes' in message}, has text: {'text' in message}")
-            except Exception:
-                break
-
-            # Handle audio (now complete file)
-            if "bytes" in message and message["bytes"] is not None:
-                audio_data = message["bytes"]
-                
-                if not is_processing:
-                    is_processing = True
-                    print(f"Received complete audio file: {len(audio_data)} bytes")
-                    
-                    try:
-                        chunk_count = 0
-                        async for audio_chunk in orchestrator.run_pipeline_streaming(
-                            audio_data, 
-                            user_sub=user_sub, 
-                            session_id=session_id
-                        ):
-                            chunk_count += 1
-                            await websocket.send_bytes(audio_chunk)
-                        
-                        print(f"Backend: Sent {chunk_count} audio chunks, sending audio_complete signal")
-                        # Signal end of audio stream
-                        await websocket.send_json({
-                            "type": "audio_complete"
-                        })
-                    except Exception as e:
-                        print(f"Pipeline error: {e}")
-                        await websocket.send_json({
-                            "type": "error",
-                            "error": str(e)
-                        })
-                    
-                    is_processing = False
-                else:
-                    print("Already processing, ignoring audio")
-
-            # Handle text messages (control commands)
-            elif "text" in message and message["text"]:
-                payload = json.loads(message["text"])
-                print(f"Received text command: {payload}")
-    except WebSocketDisconnect:
-        print(f"WebSocket disconnected: session_id={session_id}")
-    except Exception as exc:
-        print(f"WebSocket error: {exc}")
-        try:
-            await websocket.send_json({
-                "type": "error",
-                "error": str(exc)
-            })
-        except Exception:
-            pass
-
-
-
-@app.websocket("/voice/streaming/ws")
-async def voice_streaming_websocket(websocket: WebSocket):
-    """WebSocket endpoint for real-time streaming voice interaction with Deepgram STT/TTS."""
-    session_id = websocket.query_params.get("session_id", "default")
-    user_sub = websocket.query_params.get("user_sub", "")
-    
-    await streaming_handler.handle_connection(websocket, session_id, user_sub)
-
 
 
 @app.get("/auth/google/login")
 async def auth_google_login(request: Request):
     """Start Google OAuth browser redirect flow."""
     redirect_uri = request.url_for("auth_google_callback")
-    return await oauth.google.authorize_redirect(request, redirect_uri)
+    return await oauth.google.authorize_redirect(
+        request,
+        redirect_uri,
+        prompt="consent",
+        access_type="offline"
+    )
 
 
 @app.get("/auth/google/callback")
@@ -1136,6 +482,39 @@ async def auth_google_callback(request: Request):
     }
 
     user_sub = request.session["user"].get("sub", "")
+    
+    # Save refresh token to database if available
+    refresh_token = token.get("refresh_token")
+    logger.info(f"OAuth callback - refresh_token in token: {refresh_token is not None}")
+    if refresh_token:
+        with get_db() as conn:
+            # Check if profile exists
+            existing = db_execute(
+                conn,
+                "SELECT sub FROM user_profiles WHERE sub = %s",
+                (user_sub,)
+            ).fetchone()
+            
+            if existing:
+                # Update refresh token
+                db_execute(
+                    conn,
+                    "UPDATE user_profiles SET google_refresh_token = %s, updated_at = %s WHERE sub = %s",
+                    (refresh_token, datetime.utcnow().isoformat(), user_sub)
+                )
+                logger.info(f"OAuth callback - updated refresh_token for existing profile: {user_sub}")
+            else:
+                # Profile will be created during setup, but save refresh token for later
+                # Insert a minimal profile with the refresh token and required fields
+                db_execute(
+                    conn,
+                    "INSERT INTO user_profiles (sub, email, default_city, timezone, google_refresh_token, updated_at) VALUES (%s, %s, %s, %s, %s, %s)",
+                    (user_sub, user_info.get("email"), "", "Europe/Berlin", refresh_token, datetime.utcnow().isoformat())
+                )
+                logger.info(f"OAuth callback - created minimal profile with refresh_token: {user_sub}")
+    else:
+        logger.warning(f"OAuth callback - no refresh_token returned by Google. Token keys: {list(token.keys())}")
+    
     destination = "/assistant" if _is_profile_complete(_get_profile_row(user_sub)) else "/setup"
     # Redirect to React dev server for development
     react_url = getattr(settings, 'react_dev_url', 'http://localhost:5173')
@@ -1240,7 +619,7 @@ def _get_profile_row(sub: str):
         return db_execute(
             conn,
             """
-            SELECT sub, email, default_city, timezone, role, commute_mode, ppe_required, risk_tolerance, updated_at
+            SELECT sub, email, default_city, timezone, role, commute_mode, ppe_required, risk_tolerance, google_refresh_token, updated_at
             FROM user_profiles
             WHERE sub = %s
             """,

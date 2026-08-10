@@ -16,8 +16,21 @@ export const Setup = () => {
   });
 
   useEffect(() => {
+    checkAuth();
     loadProfile();
   }, []);
+
+  const checkAuth = async () => {
+    try {
+      const res = await fetch('/auth/me', { credentials: 'include' });
+      if (res.status !== 200) {
+        navigate('/login');
+      }
+    } catch (e) {
+      console.error('Auth check failed', e);
+      navigate('/login');
+    }
+  };
 
   const loadProfile = async () => {
     try {
@@ -301,21 +314,24 @@ export const Setup = () => {
                     </div>
                   </div>
 
-                  <div className="ppe-row">
-                    <div className="ppe-copy">
-                      <strong>PPE requirements</strong>
-                      <p>Turn this on if your work often involves protective equipment.</p>
+                  <div className="field">
+                    <label>PPE requirements</label>
+                    <div className="ppe-row">
+                      <div className="ppe-copy">
+                        <strong>PPE requirements</strong>
+                        <p>Turn this on if your work often involves protective equipment.</p>
+                      </div>
+                      <label className="switch" aria-label="PPE required">
+                        <input
+                          id="ppe_required"
+                          type="checkbox"
+                          checked={formData.ppe_required}
+                          onChange={(e) => setFormData({ ...formData, ppe_required: e.target.checked })}
+                        />
+                        <span className="switch-track"></span>
+                        <span className="switch-thumb"></span>
+                      </label>
                     </div>
-                    <label className="switch" aria-label="PPE required">
-                      <input
-                        id="ppe_required"
-                        type="checkbox"
-                        checked={formData.ppe_required}
-                        onChange={(e) => setFormData({ ...formData, ppe_required: e.target.checked })}
-                      />
-                      <span className="switch-track"></span>
-                      <span className="switch-thumb"></span>
-                    </label>
                   </div>
                 </div>
               </section>

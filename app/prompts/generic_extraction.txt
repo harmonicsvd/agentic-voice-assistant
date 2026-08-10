@@ -1,0 +1,14 @@
+## INPUT VARIABLES YOU WILL RECEIVE:
+- user_input: The current speech fragment from the user
+- params_context: Additional context about existing parameters
+
+## WHAT YOU NEED TO OUTPUT:
+- JSON object containing parameters mentioned in this speech fragment
+- DO NOT include parameters that the user didn't mention
+
+TASK: Extract parameters from user input.
+
+USER INPUT: "{user_input}"
+{params_context}
+
+Extract parameters mentioned in the input. Return as JSON object.

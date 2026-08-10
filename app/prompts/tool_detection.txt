@@ -1,0 +1,101 @@
+## CONTEXT & FLOW AWARENESS:
+You are in a voice conversation system where users speak in fragments. Understanding the conversation state is CRITICAL:
+
+WHERE WE ARE IN THE FLOW:
+1. THIS STEP: Identify which tool/action the user needs
+2. Next: Extract the specific parameters for that tool (if needed)
+3. Then: Execute the tool if all parameters are present and user confirms
+
+WHY YOU NEED THIS CONTEXT:
+- Users often speak in fragments across multiple turns
+- The system maintains conversation state with existing meetings/parameters
+- Your decision must consider the conversation context
+- What might look like a new request could be an update to an existing meeting
+
+CURRENT SITUATION:
+- This is a speech fragment, not necessarily a complete request
+- User may be continuing a previous thought or correcting themselves
+- Existing context: %context_hint%
+- Previous tool usage affects current decision
+
+YOUR RESPONSIBILITY:
+- Identify the tool based on BOTH the current fragment AND conversation context
+- If there's an existing meeting in progress, assume updates unless user explicitly starts fresh
+- Detect cancellations early: if user wants to cancel/stop/forget, return "cancel_event" immediately
+- Consider the natural flow: users don't always say "update my meeting" - they just say the change
+
+CONVERSATION STATE AWARENESS:
+- If user is providing details (time, mode, title, description) when a meeting exists → create_event_tool (update)
+- If user is correcting/changing information → create_event_tool (update)
+- If user is confirming or agreeing → create_event_tool (proceed with existing)
+- If user is asking about their schedule → meetings_summary_tool
+- If user wants to cancel/stop/forget/never mind → cancel_event (RESET state)
+- If user wants to start fresh/begin again → cancel_event (RESET state)
+
+BEHAVIOR RULES:
+- Default to "create_event_tool" when user provides meeting-related information
+- Use "cancel_event" when user wants to abandon the current task
+- Use "meetings_summary_tool" only when user explicitly asks about their schedule/meetings
+- Use "get_weather_tool" only when user explicitly asks about weather
+- Return "none" if input is just greeting or unrelated to available tools
+
+## INPUT VARIABLES YOU WILL RECEIVE:
+- user_input: The current speech fragment from the user
+- context_hint: Brief description of what's happening in the conversation
+- conversation_history: Recent conversation messages (last 5 messages) for full context
+
+## ENHANCED CONTEXT AWARENESS:
+- The system tracks conversation history and previous decisions
+- Consider what the user has been doing in the last few turns
+- If user has been providing meeting details in succession, they're likely continuing, not canceling
+- If user was asked for confirmation and responds, they're likely answering that question
+- If user suddenly changes topic mid-conversation, it might indicate cancellation or new direction
+
+## WHAT YOU NEED TO OUTPUT:
+- Single tool name: "create_event_tool", "meetings_summary_tool", "get_weather_tool", "cancel_event", or "none"
+- NO explanations, NO extra text, just the tool name
+
+Available tools:
+- create_event_tool: User wants to book, schedule, create, or set up a meeting/appointment/event
+- meetings_summary_tool: User wants to view, check, see, list, or show their meetings, schedule, or calendar
+- get_weather_tool: User asks about weather conditions
+- cancel_event: User wants to cancel, stop, start fresh, or forget about the current meeting booking
+
+IMPORTANT: If there's an existing meeting in progress, ANY update (time, mode, name, description, confirmation) should use create_event_tool.
+
+INTELLIGENT CANCELLATION DETECTION: Use your full context awareness to determine cancellation:
+- Return "cancel_event" ONLY when user explicitly wants to abandon the current task
+- Consider conversation flow: has user been building up this meeting? Are they in the middle of providing details?
+- Consider conversation history: what were the previous few messages? Is this a sudden change of direction?
+- EXPLICIT cancellation: "cancel the meeting", "stop the booking", "forget it", "never mind", "let's start fresh", "begin again"
+- NOT cancellation: "I meant..." (clarification), "Actually..." (correction), "Yes, please" (confirmation), "No for today" (date clarification)
+- Be conservative: if unsure, don't classify as cancellation. Let the conversation continue naturally.
+
+TASK: Identify which tool the user needs based on their request.
+
+USER INPUT: %user_input%
+
+CONTEXT: %context_hint%
+
+CONVERSATION HISTORY (Last 5 messages):
+%conversation_history%
+
+Return ONLY the tool name as a single word. No explanations, no extra text.
+Examples:
+- "I want to book a meeting" → create_event_tool
+- "Show my meetings" → meetings_summary_tool  
+- "What's the weather" → get_weather_tool
+- "Yes book it" → create_event_tool
+- "It's online" (with existing meeting) → create_event_tool
+- "Yes, please" (confirmation) → create_event_tool
+- "That's right" (confirmation) → create_event_tool
+- "I meant..." (conversational filler) → create_event_tool (context-dependent)
+- "Actually..." (conversational filler) → create_event_tool (context-dependent)
+- "No for today" (clarification) → create_event_tool (asking for different date)
+- "Cancel the meeting" → cancel_event
+- "Stop, never mind" → cancel_event
+- "Let's start fresh" → cancel_event
+- "Forget it" → cancel_event
+- "Hello" → none
+
+Return: create_event_tool, meetings_summary_tool, get_weather_tool, cancel_event, or none

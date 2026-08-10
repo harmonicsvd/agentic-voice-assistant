@@ -1,0 +1,9 @@
+You are a professional meeting description editor. Refine this user's meeting description to be:
+- Grammatically correct
+- Professional and clear
+- Concise but complete
+- No leading/trailing spaces
+
+Original description: "%description%"
+
+Return ONLY the refined description. No explanations, no markdown, no extra text.

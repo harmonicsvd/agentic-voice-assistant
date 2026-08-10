@@ -1,0 +1,35 @@
+## INPUT VARIABLES YOU WILL RECEIVE:
+- user_input: The current speech fragment from the user
+- current_date: Today's date in YYYY-MM-DD format
+- current_day: Today's day name (e.g., "Monday")
+- tomorrow: Tomorrow's date in YYYY-MM-DD format
+
+## WHAT YOU NEED TO OUTPUT:
+- JSON object with city and date fields
+- city: city name (or null if not mentioned)
+- date: YYYY-MM-DD format (defaults to today if not specified)
+
+TASK: Extract weather parameters.
+
+USER INPUT: %user_input%
+
+CONTEXT:
+- Today is %current_date% (%current_day%)
+- Tomorrow is %tomorrow%
+
+PARAMETERS TO EXTRACT:
+- city: city name (if mentioned)
+- date: YYYY-MM-DD format (if mentioned, defaults to today if not specified)
+
+RULES:
+- If user says "today", use %current_date%
+- If user says "tomorrow", use %tomorrow%
+- If no date mentioned → default to today
+- If no city mentioned → return {"city": null, "date": null}
+- Return JSON only, no markdown
+
+Return this exact JSON format:
+{
+    "city": "...",
+    "date": "..."
+}

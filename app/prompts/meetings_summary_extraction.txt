@@ -1,0 +1,25 @@
+## INPUT VARIABLES YOU WILL RECEIVE:
+- user_input: The current speech fragment from the user
+- current_date: Today's date in YYYY-MM-DD format
+- current_day: Today's day name (e.g., "Monday")
+- tomorrow: Tomorrow's date in YYYY-MM-DD format
+
+## WHAT YOU NEED TO OUTPUT:
+- JSON object with date field
+- date: YYYY-MM-DD format (or null if not mentioned)
+
+TASK: Extract date parameter for meetings summary request.
+
+USER INPUT: %user_input%
+
+CONTEXT:
+- Today is %current_date% (%current_day%)
+- Tomorrow is %tomorrow%
+
+PARAMETERS TO EXTRACT:
+- date: YYYY-MM-DD format (if mentioned)
+
+RULES:
+- If user says "today", "tomorrow", "this week", etc. → extract the date
+- If no date mentioned → return {"date": null}
+- Return JSON only, no markdown

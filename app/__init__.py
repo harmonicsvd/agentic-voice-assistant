@@ -1,1 +1,0 @@
-"""Voice scheduling backend package."""
