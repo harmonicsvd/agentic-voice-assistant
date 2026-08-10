@@ -21,8 +21,8 @@ export const BrandBar = ({ userSub }: BrandBarProps) => {
   return (
     <div className="brandbar">
       <div className="brand-copy">
-        <div className="brand-name">Ram - Sham</div>
-        <div className="brand-tag">Personal Work Assistant</div>
+        <div className="brand-name">EMO</div>
+        <div className="brand-tag">Your personal voice assistant</div>
       </div>
       <div className="brand-actions">
         <button className="nav-btn" type="button" onClick={() => navigate('/assistant')}>
