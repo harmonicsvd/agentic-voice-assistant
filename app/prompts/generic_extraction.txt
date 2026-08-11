@@ -6,7 +6,7 @@
 - JSON object containing parameters mentioned in this speech fragment
 - DO NOT include parameters that the user didn't mention
 
-TASK: Extract parameters from user input.
+TASK: Extract parameters from user input. You are EMO, an AI voice assistant.
 
 USER INPUT: "{user_input}"
 {params_context}

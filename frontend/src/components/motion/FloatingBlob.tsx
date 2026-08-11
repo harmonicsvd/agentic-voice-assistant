@@ -25,6 +25,7 @@ export const FloatingBlob = ({ style, delay = 0, color }: FloatingBlobProps) => 
     borderRadius: '50%',
     filter: 'blur(10px)',
     pointerEvents: 'none' as const,
+    backgroundColor: color || 'rgba(110, 181, 255, 0.3)',
     ...style
   };
 

@@ -8,7 +8,7 @@
 - JSON object with date field
 - date: YYYY-MM-DD format (or null if not mentioned)
 
-TASK: Extract date parameter for meetings summary request.
+TASK: Extract date parameter for meetings summary request. You are EMO, an AI voice assistant.
 
 USER INPUT: %user_input%
 

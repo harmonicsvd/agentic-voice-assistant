@@ -84,9 +84,16 @@ TOOL_CONFIGS = {
             "meeting", "book", "schedule", "appointment", 
             "call", "discuss", "talk"
         ],
-        # Confirmation phrases for execution (only explicit action phrases, not generic "yes")
-        # Generic words like "yes", "please", "correct" should go through LLM to check bot's previous question
+        # Confirmation phrases for execution (tiered approach)
+        # Tier 1: Natural confirmations (when all required fields present)
+        # Tier 2: Explicit action phrases (for re-confirmation or uncertain situations)
         "confirmation_phrases": [
+            # Tier 1: Natural confirmations
+            "yes", "yeah", "yep", "correct", "right", "that's right", "that's correct",
+            "sounds good", "perfect", "great", "exactly", "absolutely", "sure",
+            "please do", "please proceed", "okay", "alright", "fine",
+            
+            # Tier 2: Explicit action phrases (for re-confirmation)
             "do it", "go ahead", "execute it", "proceed", "book it",
             "please book", "schedule it", "create it", "that's correct, do it",
             "book now", "you can book", "yes book it", "yes do it",
@@ -103,12 +110,11 @@ TOOL_CONFIGS = {
         ],
         # Continuation words for description merging
         "continuation_words": ["as well as", "and also", "plus", "also", "and"],
-        # Default values for fields
+        # Default values for fields (only for optional fields, not required ones)
         "default_values": {
             "timezone": "Europe/Berlin",
-            "duration": "1 hour",
-            "name": "Meeting",
-            "meeting_mode": "online"
+            "duration": "1 hour"
+            # Removed defaults for required fields (name, meeting_mode) to prevent premature booking
         },
         # Corruption indicators for validation (specific phrases that indicate corrupted state)
         "corruption_indicators": [
@@ -138,6 +144,17 @@ TOOL_CONFIGS = {
         "confirmation_prompt": None,
         "is_read_only": True,
         "context_formatter": "format_weather_context"
+    },
+    "general_conversation": {
+        "required_fields": [],
+        "optional_fields": [],
+        "state_key": None,
+        "requires_confirmation": False,
+        "state_reset_on_cancel": False,
+        "extraction_prompt": None,
+        "confirmation_prompt": None,
+        "is_read_only": True,
+        "context_formatter": None
     },
     "cancel_event": {
         "required_fields": [],

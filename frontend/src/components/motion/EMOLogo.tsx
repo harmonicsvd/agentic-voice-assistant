@@ -1,7 +1,6 @@
 import { motion, Easing } from 'framer-motion';
-import { useLottie } from 'lottie-react';
-import { useState, useEffect } from 'react';
 import { useTypingAnimation } from '../../hooks/useTypingAnimation';
+import { EmojiCarousel } from './EmojiCarousel';
 
 // Typing animation component using custom hook
 const TypingAnimation = () => {
@@ -22,7 +21,7 @@ const TypingAnimation = () => {
       style={{
         fontSize: 'clamp(1rem, 1.5vw, 1.5rem)',
         color: 'var(--text-soft)',
-        marginTop: '40px',
+        marginTop: '20px',
         textAlign: 'center',
         opacity: 0.9,
         minHeight: '2rem'
@@ -33,111 +32,9 @@ const TypingAnimation = () => {
   );
 };
 
-// Individual emoji component for use in EMOLogo
-const EmojiLabel = ({ emojiFile }: { emojiFile: string }) => {
-  const [animationData, setAnimationData] = useState<any>(null);
+// Old components removed - replaced with EmojiCarousel
 
-  useEffect(() => {
-    const loadAnimation = async () => {
-      try {
-        const response = await fetch(emojiFile + `?t=${Date.now()}`);
-        const data = await response.json();
-        setAnimationData(data);
-      } catch (error) {
-        console.error('Failed to load animation:', error);
-      }
-    };
-
-    loadAnimation();
-  }, [emojiFile]);
-
-  const options = {
-    animationData: animationData,
-    loop: true,
-    autoplay: true,
-  };
-  const { View } = useLottie(options);
-
-  if (!animationData) {
-    return <div style={{ width: '80px', height: '80px' }}></div>;
-  }
-
-  return (
-    <div style={{ width: '80px', height: '80px' }}>
-      {View}
-    </div>
-  );
-};
-
-// Component to display all 5 emojis horizontally
-const EmojiRow = () => {
-  const emojiFiles = [
-    '/Avatars/lottie.json',      // Face with monocle - attentive
-    '/Avatars/lottie-2.json',    // Thinking face - hand on chin
-    '/Avatars/lottie-3.json',    // Grinning face - happy
-    '/Avatars/lottie-5.json',    // Sleeping face - Z's floating
-    '/Avatars/lottie-7.json',    // Spiral eyes - confused/error
-  ];
-
-  // Emoji row animation timing - after labels
-  const emojiVariants = [
-    {
-      hidden: { opacity: 0, x: 0 },
-      visible: { opacity: 1, x: -40, transition: { duration: 0.8, ease: "easeOut" as Easing, delay: 2.5 } }
-    },
-    {
-      hidden: { opacity: 0, x: 0 },
-      visible: { opacity: 1, x: -20, transition: { duration: 0.8, ease: "easeOut" as Easing, delay: 2.7 } }
-    },
-    {
-      hidden: { opacity: 0, x: 0 },
-      visible: { opacity: 1, x: 0, transition: { duration: 0.8, ease: "easeOut" as Easing, delay: 2.9 } }
-    },
-    {
-      hidden: { opacity: 0, x: 0 },
-      visible: { opacity: 1, x: 20, transition: { duration: 0.8, ease: "easeOut" as Easing, delay: 3.1 } }
-    },
-    {
-      hidden: { opacity: 0, x: 0 },
-      visible: { opacity: 1, x: 40, transition: { duration: 0.8, ease: "easeOut" as Easing, delay: 3.3 } }
-    }
-  ];
-
-  return (
-    <motion.div
-      initial="hidden"
-      animate="visible"
-      style={{
-        display: 'flex',
-        flexDirection: 'row',
-        alignItems: 'center',
-        justifyContent: 'center',
-        gap: '15px',
-        marginTop: '20px'
-      }}
-    >
-      {emojiFiles.map((emojiFile, index) => (
-        <motion.div key={index} variants={emojiVariants[index]}>
-          <EmojiLabel emojiFile={emojiFile} />
-        </motion.div>
-      ))}
-    </motion.div>
-  );
-};
-
-  // Container variants for main logo
-  const containerVariants = {
-    hidden: { opacity: 0 },
-    visible: {
-      opacity: 1,
-      transition: {
-        duration: 0.8,
-        ease: "easeOut" as Easing
-      }
-    }
-  };
-
-export const EMOLogo = () => {
+export const EMOLogo = ({ onColorChange }: { onColorChange?: (color: string) => void } = {}) => {
   // Container variants for main logo
   const containerVariants = {
     hidden: { opacity: 0 },
@@ -337,8 +234,8 @@ export const EMOLogo = () => {
         </div>
       </motion.div>
 
-      {/* Emoji Row - All 5 emojis horizontally below labels */}
-      <EmojiRow />
+      {/* Emoji Carousel - Interactive 3D carousel */}
+      <EmojiCarousel onColorChange={onColorChange} />
 
       {/* Typing Animation */}
       <TypingAnimation />

@@ -69,12 +69,12 @@ def init_db():
     CREATE TABLE IF NOT EXISTS user_profiles (
         sub TEXT PRIMARY KEY,
         email TEXT NOT NULL,
-        default_city TEXT NOT NULL,
-        timezone TEXT NOT NULL DEFAULT 'Europe/Berlin',
-        role TEXT,
-        commute_mode TEXT,
-        ppe_required BOOLEAN DEFAULT FALSE,
-        risk_tolerance TEXT,
+        name TEXT,
+        work_description TEXT,
+        industry TEXT,
+        responsibilities TEXT,
+        company_name TEXT,
+        work_environment TEXT,
         google_refresh_token TEXT,
         updated_at TEXT NOT NULL
     )

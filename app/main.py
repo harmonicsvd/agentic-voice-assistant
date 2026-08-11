@@ -79,12 +79,11 @@ VOICE_HTML = BASE_DIR / "index.html"
 
 class ProfileUpdate(BaseModel):
     """Validated payload for updating user profile preferences."""
-    role: str = Field(min_length=2, max_length=80)
-    default_city: str = Field(min_length=2, max_length=80)
-    timezone: str = Field(default="Europe/Berlin", min_length=3, max_length=80)
-    commute_mode: str = Field(min_length=2, max_length=40)
-    risk_tolerance: str = Field(min_length=2, max_length=20)
-    ppe_required: bool = False
+    work_description: str = Field(default="", max_length=200)
+    industry: str = Field(default="", max_length=100)
+    responsibilities: str = Field(default="", max_length=500)
+    company_name: str = Field(default="", max_length=100)
+    work_environment: str = Field(default="", max_length=50)
 
 
 @app.get("/login")
@@ -157,36 +156,48 @@ async def put_profile(payload: ProfileUpdate, request: Request):
             ).fetchone()
             existing_refresh_token = existing["google_refresh_token"] if existing else None
             
+            # For SQLite, fetch existing name to preserve it (INSERT OR REPLACE replaces entire row)
+            if not using_postgres():
+                cursor = db_execute(
+                    conn,
+                    "SELECT name FROM user_profiles WHERE sub = ?",
+                    (user["sub"],)
+                )
+                row = cursor.fetchone()
+                existing_name = row["name"] if row and row.get("name") else ""
+            else:
+                existing_name = ""  # PostgreSQL ON CONFLICT will preserve name
+
             # Use different upsert syntax based on database type
             if using_postgres():
                 db_execute(
                     conn,
                     """
                     INSERT INTO user_profiles (
-                        sub, email, default_city, timezone, role, commute_mode,
-                        ppe_required, risk_tolerance, google_refresh_token, updated_at
+                        sub, email, name, work_description, industry, responsibilities, company_name, work_environment,
+                        google_refresh_token, updated_at
                     )
                     VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                     ON CONFLICT(sub) DO UPDATE SET
                         email = excluded.email,
-                        default_city = excluded.default_city,
-                        timezone = excluded.timezone,
-                        role = excluded.role,
-                        commute_mode = excluded.commute_mode,
-                        ppe_required = excluded.ppe_required,
-                        risk_tolerance = excluded.risk_tolerance,
+                        name = user_profiles.name,
+                        work_description = excluded.work_description,
+                        industry = excluded.industry,
+                        responsibilities = excluded.responsibilities,
+                        company_name = excluded.company_name,
+                        work_environment = excluded.work_environment,
                         google_refresh_token = COALESCE(excluded.google_refresh_token, user_profiles.google_refresh_token),
                         updated_at = excluded.updated_at
                     """,
                     (
                         user["sub"],
                         user.get("email", ""),
-                        payload.default_city.strip(),
-                        payload.timezone.strip(),
-                        payload.role.strip(),
-                        payload.commute_mode.strip(),
-                        payload.ppe_required,
-                        payload.risk_tolerance.strip(),
+                        "",  # name preserved by ON CONFLICT: name = user_profiles.name
+                        payload.work_description.strip(),
+                        payload.industry.strip(),
+                        payload.responsibilities.strip(),
+                        payload.company_name.strip(),
+                        payload.work_environment.strip(),
                         existing_refresh_token,
                         updated_at,
                     ),
@@ -197,20 +208,20 @@ async def put_profile(payload: ProfileUpdate, request: Request):
                     conn,
                     """
                     INSERT OR REPLACE INTO user_profiles (
-                        sub, email, default_city, timezone, role, commute_mode,
-                        ppe_required, risk_tolerance, google_refresh_token, updated_at
+                        sub, email, name, work_description, industry, responsibilities, company_name, work_environment,
+                        google_refresh_token, updated_at
                     )
                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         user["sub"],
                         user.get("email", ""),
-                        payload.default_city.strip(),
-                        payload.timezone.strip(),
-                        payload.role.strip(),
-                        payload.commute_mode.strip(),
-                        payload.ppe_required,
-                        payload.risk_tolerance.strip(),
+                        existing_name,  # preserve existing name from OAuth
+                        payload.work_description.strip(),
+                        payload.industry.strip(),
+                        payload.responsibilities.strip(),
+                        payload.company_name.strip(),
+                        payload.work_environment.strip(),
                         existing_refresh_token,
                         updated_at,
                     ),
@@ -242,7 +253,7 @@ async def get_internal_profile(
         row = db_execute(
             conn,
             """
-            SELECT sub, email, default_city, timezone, role, commute_mode, ppe_required, risk_tolerance, google_refresh_token, updated_at
+            SELECT sub, email, name, work_description, industry, responsibilities, company_name, work_environment, google_refresh_token, updated_at
             FROM user_profiles
             WHERE sub = %s
             """,
@@ -464,61 +475,69 @@ async def auth_google_login(request: Request):
 @app.get("/auth/google/callback")
 async def auth_google_callback(request: Request):
     """Handle Google OAuth callback and persist session identity."""
-    token = await oauth.google.authorize_access_token(request)
-    user_info = token.get("userinfo")
+    try:
+        token = await oauth.google.authorize_access_token(request)
+        user_info = token.get("userinfo")
 
-    if not user_info:
-        user_info = await oauth.google.parse_id_token(request, token)
+        if not user_info:
+            user_info = await oauth.google.parse_id_token(request, token)
 
-    request.session["user"] = {
-        "sub": user_info.get("sub"),
-        "email": user_info.get("email"),
-        "name": user_info.get("name"),
-        "picture": user_info.get("picture"),
-    }
-    request.session["token"] = {
-        "access_token": token.get("access_token"),
-        "expires_at": token.get("expires_at"),
-    }
+        request.session["user"] = {
+            "sub": user_info.get("sub"),
+            "email": user_info.get("email"),
+            "name": user_info.get("name"),
+            "picture": user_info.get("picture"),
+        }
+        request.session["token"] = {
+            "access_token": token.get("access_token"),
+            "expires_at": token.get("expires_at"),
+        }
 
-    user_sub = request.session["user"].get("sub", "")
-    
-    # Save refresh token to database if available
-    refresh_token = token.get("refresh_token")
-    logger.info(f"OAuth callback - refresh_token in token: {refresh_token is not None}")
-    if refresh_token:
-        with get_db() as conn:
-            # Check if profile exists
-            existing = db_execute(
-                conn,
-                "SELECT sub FROM user_profiles WHERE sub = %s",
-                (user_sub,)
-            ).fetchone()
-            
-            if existing:
-                # Update refresh token
-                db_execute(
-                    conn,
-                    "UPDATE user_profiles SET google_refresh_token = %s, updated_at = %s WHERE sub = %s",
-                    (refresh_token, datetime.utcnow().isoformat(), user_sub)
-                )
-                logger.info(f"OAuth callback - updated refresh_token for existing profile: {user_sub}")
-            else:
-                # Profile will be created during setup, but save refresh token for later
-                # Insert a minimal profile with the refresh token and required fields
-                db_execute(
-                    conn,
-                    "INSERT INTO user_profiles (sub, email, default_city, timezone, google_refresh_token, updated_at) VALUES (%s, %s, %s, %s, %s, %s)",
-                    (user_sub, user_info.get("email"), "", "Europe/Berlin", refresh_token, datetime.utcnow().isoformat())
-                )
-                logger.info(f"OAuth callback - created minimal profile with refresh_token: {user_sub}")
-    else:
-        logger.warning(f"OAuth callback - no refresh_token returned by Google. Token keys: {list(token.keys())}")
-    
-    destination = "/assistant" if _is_profile_complete(_get_profile_row(user_sub)) else "/setup"
-    # Redirect to React dev server for development
-    react_url = getattr(settings, 'react_dev_url', 'http://localhost:5173')
-    return RedirectResponse(url=f"{react_url}{destination}?user_sub={user_sub}", status_code=302)
+        user_sub = request.session["user"].get("sub", "")
+        
+        # Save refresh token to database if available
+        refresh_token = token.get("refresh_token")
+        logger.info(f"OAuth callback - refresh_token in token: {refresh_token is not None}")
+        if refresh_token:
+            try:
+                with get_db() as conn:
+                    # Check if profile exists
+                    existing = db_execute(
+                        conn,
+                        "SELECT sub FROM user_profiles WHERE sub = %s",
+                        (user_sub,)
+                    ).fetchone()
+                    
+                    if existing:
+                        # Update refresh token
+                        db_execute(
+                            conn,
+                            "UPDATE user_profiles SET google_refresh_token = %s, updated_at = %s WHERE sub = %s",
+                            (refresh_token, datetime.now(timezone.utc).isoformat(), user_sub)
+                        )
+                        logger.info(f"OAuth callback - updated refresh_token for existing profile: {user_sub}")
+                    else:
+                        # Profile will be created during setup, but save refresh token for later
+                        # Insert a minimal profile with the refresh token and required fields
+                        db_execute(
+                            conn,
+                            "INSERT INTO user_profiles (sub, email, name, work_description, industry, responsibilities, company_name, work_environment, google_refresh_token, updated_at) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
+                            (user_sub, user_info.get("email"), user_info.get("name", ""), "", "", "", "", "", refresh_token, datetime.now(timezone.utc).isoformat())
+                        )
+                        logger.info(f"OAuth callback - created minimal profile with refresh_token: {user_sub}")
+            except Exception as db_error:
+                logger.error(f"OAuth callback - database error: {db_error}")
+                # Continue without saving refresh token if DB fails
+        else:
+            logger.warning(f"OAuth callback - no refresh_token returned by Google. Token keys: {list(token.keys())}")
+        
+        destination = "/assistant" if _is_profile_complete(_get_profile_row(user_sub)) else "/setup"
+        # Redirect to React dev server for development
+        react_url = getattr(settings, 'react_dev_url', 'http://localhost:5173')
+        return RedirectResponse(url=f"{react_url}{destination}?user_sub={user_sub}", status_code=302)
+    except Exception as e:
+        logger.error(f"OAuth callback error: {e}")
+        return JSONResponse({"error": f"OAuth callback failed: {str(e)}"}, status_code=500)
 
 
 @app.get("/auth/me")
@@ -615,16 +634,20 @@ def get_current_user_or_401(request: Request):
 
 def _get_profile_row(sub: str):
     """Load one profile row used by page routing and profile APIs."""
-    with get_db() as conn:
-        return db_execute(
-            conn,
-            """
-            SELECT sub, email, default_city, timezone, role, commute_mode, ppe_required, risk_tolerance, google_refresh_token, updated_at
-            FROM user_profiles
-            WHERE sub = %s
-            """,
-            (sub,),
-        ).fetchone()
+    try:
+        with get_db() as conn:
+            return db_execute(
+                conn,
+                """
+                SELECT sub, email, name, work_description, industry, responsibilities, company_name, work_environment, google_refresh_token, updated_at
+                FROM user_profiles
+                WHERE sub = %s
+                """,
+                (sub,),
+            ).fetchone()
+    except Exception as e:
+        logger.error(f"Error getting profile row for sub {sub}: {e}")
+        return None
 
 
 def _is_profile_complete(row) -> bool:
@@ -633,43 +656,13 @@ def _is_profile_complete(row) -> bool:
         return False
 
     required_fields = [
-        row["role"],
-        row["default_city"],
-        row["timezone"],
-        row["commute_mode"],
-        row["risk_tolerance"],
+        row.get("work_description", ""),
+        row.get("industry", ""),
+        row.get("responsibilities", ""),
+        row.get("company_name", ""),
+        row.get("work_environment", ""),
     ]
     return all(isinstance(value, str) and value.strip() for value in required_fields)
-
-
-def _lookup_profile_city(sub: str | None) -> str | None:
-    """Read default city from local profile DB for fallback event city logic."""
-    if not sub:
-        return None
-
-    with get_db() as conn:
-        row = db_execute(
-            conn,
-            "SELECT default_city FROM user_profiles WHERE sub = %s",
-            (sub,),
-        ).fetchone()
-    city = (row["default_city"] or "").strip() if row else ""
-    return city or None
-
-
-def _lookup_profile_timezone(sub: str | None) -> str | None:
-    """Read timezone from local profile DB for event scheduling."""
-    if not sub:
-        return None
-
-    with get_db() as conn:
-        row = db_execute(
-            conn,
-            "SELECT timezone FROM user_profiles WHERE sub = %s",
-            (sub,),
-        ).fetchone()
-    tz = (row["timezone"] or "").strip() if row else ""
-    return tz or None
 
 
 # Mount static files for frontend (must be after all route definitions)

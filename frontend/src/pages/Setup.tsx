@@ -1,18 +1,29 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { motion, Easing } from 'framer-motion';
+import { AnimatedBackground } from '../components/motion/AnimatedBackground';
+import { EmojiCarousel } from '../components/motion/EmojiCarousel';
+
+interface FormData {
+  work_description: string;
+  industry: string;
+  responsibilities: string;
+  company_name: string;
+  work_environment: string;
+}
 
 export const Setup = () => {
   const navigate = useNavigate();
   const [currentStep, setCurrentStep] = useState(1);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
-  const [formData, setFormData] = useState({
-    role: '',
-    default_city: '',
-    timezone: '',
-    commute_mode: '',
-    risk_tolerance: '',
-    ppe_required: false,
+  const [accentColor, setAccentColor] = useState('#6EB5FF');
+  const [formData, setFormData] = useState<FormData>({
+    work_description: '',
+    industry: '',
+    responsibilities: '',
+    company_name: '',
+    work_environment: '',
   });
 
   useEffect(() => {
@@ -44,53 +55,41 @@ export const Setup = () => {
         return;
       }
 
-      if (!formData.timezone && Intl.DateTimeFormat().resolvedOptions().timeZone) {
-        setFormData(prev => ({ ...prev, timezone: Intl.DateTimeFormat().resolvedOptions().timeZone }));
-      }
-
-      if (profile.role) setFormData(prev => ({ ...prev, role: profile.role }));
-      if (profile.default_city) setFormData(prev => ({ ...prev, default_city: profile.default_city }));
-      if (profile.timezone) setFormData(prev => ({ ...prev, timezone: profile.timezone }));
-      if (profile.commute_mode) setFormData(prev => ({ ...prev, commute_mode: profile.commute_mode }));
-      if (profile.risk_tolerance) setFormData(prev => ({ ...prev, risk_tolerance: profile.risk_tolerance }));
-      if (typeof profile.ppe_required !== 'undefined') {
-        setFormData(prev => ({ ...prev, ppe_required: Boolean(profile.ppe_required) }));
-      }
+      if (profile.work_description) setFormData(prev => ({ ...prev, work_description: profile.work_description }));
+      if (profile.industry) setFormData(prev => ({ ...prev, industry: profile.industry }));
+      if (profile.responsibilities) setFormData(prev => ({ ...prev, responsibilities: profile.responsibilities }));
+      if (profile.company_name) setFormData(prev => ({ ...prev, company_name: profile.company_name }));
+      if (profile.work_environment) setFormData(prev => ({ ...prev, work_environment: profile.work_environment }));
     } catch (_err) {
-      if (!formData.timezone && Intl.DateTimeFormat().resolvedOptions().timeZone) {
-        setFormData(prev => ({ ...prev, timezone: Intl.DateTimeFormat().resolvedOptions().timeZone }));
-      }
+      // Silent error handling
     }
   };
 
-  const validateCurrentStep = () => {
+  const validateCurrentStep = (): boolean => {
     setError('');
 
     if (currentStep === 1) {
-      if (!formData.role.trim()) {
-        setError('Please choose your role before continuing.');
+      if (!formData.work_description.trim()) {
+        setError('Please describe your work before continuing.');
+        return false;
+      }
+      if (!formData.industry.trim()) {
+        setError('Please specify your industry.');
         return false;
       }
     }
 
     if (currentStep === 2) {
-      if (!formData.default_city.trim()) {
-        setError('Please add your default city.');
+      if (!formData.responsibilities.trim()) {
+        setError('Please describe your main responsibilities.');
         return false;
       }
-      if (!formData.timezone.trim()) {
-        setError('Please add your timezone.');
+      if (!formData.company_name.trim()) {
+        setError('Please add your company name.');
         return false;
       }
-      if (!formData.commute_mode.trim()) {
-        setError('Please choose how you usually commute.');
-        return false;
-      }
-    }
-
-    if (currentStep === 3) {
-      if (!formData.risk_tolerance) {
-        setError('Please select your risk tolerance.');
+      if (!formData.work_environment.trim()) {
+        setError('Please specify your work environment.');
         return false;
       }
     }
@@ -101,7 +100,7 @@ export const Setup = () => {
   const handleNext = async () => {
     if (!validateCurrentStep()) return;
 
-    if (currentStep < 3) {
+    if (currentStep < 2) {
       setCurrentStep(currentStep + 1);
       return;
     }
@@ -134,237 +133,349 @@ export const Setup = () => {
     }
   };
 
+  const containerVariants = {
+    hidden: { opacity: 0 },
+    visible: {
+      opacity: 1,
+      transition: {
+        duration: 0.8,
+        ease: "easeOut" as Easing
+      }
+    }
+  };
+
+  const formVariants = {
+    hidden: { opacity: 0, x: 50 },
+    visible: {
+      opacity: 1,
+      x: 0,
+      transition: {
+        duration: 0.6,
+        ease: "easeOut" as Easing,
+        delay: 0.3
+      }
+    }
+  };
+
   return (
-    <main className="page">
-      <section className="shell shell-setup">
-        <div className="story">
-          <div className="brandbar brandbar-simple">
-            <div className="brand-name">Ram - Sham</div>
-            <div className="brand-tag">Personal Work Assistant</div>
-          </div>
+    <main
+      style={{
+        position: 'relative',
+        display: 'flex',
+        flexDirection: 'column',
+        minHeight: '100vh',
+        background: '#F7F9FC',
+        overflow: 'hidden',
+      }}
+    >
+      {/* Animated background with floating blobs and particles */}
+      <AnimatedBackground accentColor={accentColor} />
 
-          <div className="eyebrow">Finish your setup</div>
-          <h1 className="hero-title">Set up your personal assistant for work.</h1>
-          <p className="hero-copy">
-            Ram learns from your role, routines, and preferences. Sham uses your
-            work context to add weather-aware preparation guidance behind the scenes.
+      {/* Film grain overlay */}
+      <div className="film-grain" aria-hidden="true" />
+
+      <motion.div
+        variants={containerVariants}
+        initial="hidden"
+        animate="visible"
+        style={{
+          position: 'relative',
+          zIndex: 1,
+          display: 'flex',
+          flexDirection: 'row',
+          alignItems: 'center',
+          justifyContent: 'center',
+          minHeight: '100vh',
+          padding: '24px',
+          gap: '48px',
+        }}
+      >
+        {/* Left side - Emoji Carousel with proper container */}
+        <div
+          style={{
+            width: '100%',
+            maxWidth: '480px',
+            display: 'flex',
+            flexDirection: 'column',
+            alignItems: 'center',
+            justifyContent: 'center',
+            textAlign: 'center',
+            marginTop: '-60px'
+          }}
+        >
+          <EmojiCarousel onColorChange={setAccentColor} />
+          <p
+            style={{
+              fontSize: '1.25rem',
+              color: 'var(--text-soft)',
+              textAlign: 'center',
+              marginTop: '24px',
+            }}
+          >
+            Let's get to know you
           </p>
-
-          <div className="benefits">
-            <div className="benefit">
-              <strong>Role-aware guidance</strong>
-              <p>
-                Ram uses your setup preferences while Sham adds personalized
-                meeting preparation and weather-aware suggestions.
-              </p>
-            </div>
-
-            <div className="benefit">
-              <strong>Built for your daily rhythm</strong>
-              <p>
-                Your city, timezone, and commute style help Ram and Sham deliver
-                practical support when timing and travel matter.
-              </p>
-            </div>
-          </div>
         </div>
 
-        <div className="card">
-          <div className="progress-row">
-            <div className="progress-copy">Step {currentStep} of 3</div>
-            <div className="progress-bar">
-              <div className="progress-fill" style={{ width: `${currentStep * 33.333}%` }}></div>
+        {/* Right side - Form */}
+        <motion.div
+          variants={formVariants}
+          style={{
+            width: '100%',
+            maxWidth: '480px',
+            background: 'white',
+            borderRadius: '24px',
+            padding: '32px',
+            boxShadow: '0 8px 32px rgba(0, 0, 0, 0.08)',
+          }}
+        >
+          {/* Progress indicator */}
+          <div style={{ marginBottom: '24px' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '8px' }}>
+              <span style={{ fontSize: '0.875rem', color: 'var(--text-soft)' }}>
+                Step {currentStep} of 2
+              </span>
+              <span style={{ fontSize: '0.875rem', color: 'var(--text-soft)' }}>
+                {Math.round((currentStep / 2) * 100)}%
+              </span>
+            </div>
+            <div style={{ height: '4px', background: '#E8F0FF', borderRadius: '2px' }}>
+              <div
+                style={{
+                  height: '100%',
+                  width: `${(currentStep / 2) * 100}%`,
+                  background: accentColor,
+                  borderRadius: '2px',
+                  transition: 'width 0.3s ease',
+                }}
+              />
             </div>
           </div>
 
-          <form>
-            {currentStep === 1 && (
-              <section className="step-panel active">
-                <div className="step-tag">Work</div>
-                <h2 className="step-title">Tell Ram - Sham about your work</h2>
-                <p className="step-copy">
-                  Your role helps Ram understand your meetings and helps Sham
-                  prepare relevant guidance.
-                </p>
+          {/* Form content */}
+          {currentStep === 1 && (
+            <motion.div
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.4, ease: "easeOut" as Easing }}
+            >
+              <h2 style={{ fontSize: '1.5rem', marginBottom: '8px', color: 'var(--text-main)' }}>
+                Tell us about your work
+              </h2>
+              <p style={{ fontSize: '0.875rem', color: 'var(--text-soft)', marginBottom: '24px' }}>
+                Help us understand what you do
+              </p>
 
-                <div className="field-group">
-                  <div className="field">
-                    <label htmlFor="role">Your role</label>
-                    <select
-                      id="role"
-                      value={formData.role}
-                      onChange={(e) => setFormData({ ...formData, role: e.target.value })}
-                      required
-                    >
-                      <option value="">Select your role</option>
-                      <option>Architect</option>
-                      <option>Contractor</option>
-                      <option>Project Manager</option>
-                      <option>Site Supervisor</option>
-                      <option>Sales Manager</option>
-                      <option>Event Coordinator</option>
-                      <option>Operations Lead</option>
-                      <option>Other</option>
-                    </select>
-                  </div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+                <div>
+                  <label style={{ display: 'block', fontSize: '0.875rem', marginBottom: '8px', color: 'var(--text-main)' }}>
+                    What describes your work best?
+                  </label>
+                  <input
+                    type="text"
+                    placeholder="e.g., Software Development, Construction, Healthcare"
+                    value={formData.work_description}
+                    onChange={(e) => setFormData({ ...formData, work_description: e.target.value })}
+                    style={{
+                      width: '100%',
+                      padding: '12px 16px',
+                      border: '1px solid #E8F0FF',
+                      borderRadius: '12px',
+                      fontSize: '1rem',
+                      outline: 'none',
+                      transition: 'border-color 0.2s',
+                    }}
+                    onFocus={(e) => e.target.style.borderColor = accentColor}
+                    onBlur={(e) => e.target.style.borderColor = '#E8F0FF'}
+                  />
                 </div>
-              </section>
-            )}
 
-            {currentStep === 2 && (
-              <section className="step-panel active">
-                <div className="step-tag">Context</div>
-                <h2 className="step-title">Set your daily context</h2>
-                <p className="step-copy">
-                  These details help Ram and Sham support travel, timing, and
-                  weather-sensitive meetings more practically.
-                </p>
-
-                <div className="field-group">
-                  <div className="field">
-                    <label htmlFor="default_city">Default city</label>
-                    <input
-                      id="default_city"
-                      type="text"
-                      placeholder="Berlin"
-                      value={formData.default_city}
-                      onChange={(e) => setFormData({ ...formData, default_city: e.target.value })}
-                      required
-                    />
-                  </div>
-
-                  <div className="field">
-                    <label htmlFor="timezone">Timezone</label>
-                    <input
-                      id="timezone"
-                      type="text"
-                      placeholder="Europe/Berlin"
-                      value={formData.timezone}
-                      onChange={(e) => setFormData({ ...formData, timezone: e.target.value })}
-                      required
-                    />
-                  </div>
-
-                  <div className="field">
-                    <label htmlFor="commute_mode">How do you usually commute?</label>
-                    <select
-                      id="commute_mode"
-                      value={formData.commute_mode}
-                      onChange={(e) => setFormData({ ...formData, commute_mode: e.target.value })}
-                      required
-                    >
-                      <option value="">Choose a commute style</option>
-                      <option>Car</option>
-                      <option>Public transport</option>
-                      <option>Walk</option>
-                      <option>Bike</option>
-                      <option>Mixed</option>
-                    </select>
-                  </div>
+                <div>
+                  <label style={{ display: 'block', fontSize: '0.875rem', marginBottom: '8px', color: 'var(--text-main)' }}>
+                    What industry do you work in?
+                  </label>
+                  <input
+                    type="text"
+                    placeholder="e.g., Technology, Healthcare, Finance"
+                    value={formData.industry}
+                    onChange={(e) => setFormData({ ...formData, industry: e.target.value })}
+                    style={{
+                      width: '100%',
+                      padding: '12px 16px',
+                      border: '1px solid #E8F0FF',
+                      borderRadius: '12px',
+                      fontSize: '1rem',
+                      outline: 'none',
+                      transition: 'border-color 0.2s',
+                    }}
+                    onFocus={(e) => e.target.style.borderColor = accentColor}
+                    onBlur={(e) => e.target.style.borderColor = '#E8F0FF'}
+                  />
                 </div>
-              </section>
-            )}
+              </div>
+            </motion.div>
+          )}
 
-            {currentStep === 3 && (
-              <section className="step-panel active">
-                <div className="step-tag">Preferences</div>
-                <h2 className="step-title">Set your preferences</h2>
-                <p className="step-copy">
-                  Ram and Sham use these preferences to shape how cautious and practical
-                  its guidance should be.
-                </p>
+          {currentStep === 2 && (
+            <motion.div
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.4, ease: "easeOut" as Easing }}
+            >
+              <h2 style={{ fontSize: '1.5rem', marginBottom: '8px', color: 'var(--text-main)' }}>
+                Your role details
+              </h2>
+              <p style={{ fontSize: '0.875rem', color: 'var(--text-soft)', marginBottom: '24px' }}>
+                More context about your position
+              </p>
 
-                <div className="field-group">
-                  <div className="field">
-                    <label>Risk tolerance</label>
-                    <div className="choice-row">
-                      <label className="choice-option">
-                        <input
-                          type="radio"
-                          name="risk_tolerance"
-                          value="Low"
-                          checked={formData.risk_tolerance === 'Low'}
-                          onChange={(e) => setFormData({ ...formData, risk_tolerance: e.target.value })}
-                          required
-                        />
-                        <span>Low</span>
-                      </label>
-                      <label className="choice-option">
-                        <input
-                          type="radio"
-                          name="risk_tolerance"
-                          value="Medium"
-                          checked={formData.risk_tolerance === 'Medium'}
-                          onChange={(e) => setFormData({ ...formData, risk_tolerance: e.target.value })}
-                          required
-                        />
-                        <span>Medium</span>
-                      </label>
-                      <label className="choice-option">
-                        <input
-                          type="radio"
-                          name="risk_tolerance"
-                          value="High"
-                          checked={formData.risk_tolerance === 'High'}
-                          onChange={(e) => setFormData({ ...formData, risk_tolerance: e.target.value })}
-                          required
-                        />
-                        <span>High</span>
-                      </label>
-                    </div>
-                  </div>
-
-                  <div className="field">
-                    <label>PPE requirements</label>
-                    <div className="ppe-row">
-                      <div className="ppe-copy">
-                        <strong>PPE requirements</strong>
-                        <p>Turn this on if your work often involves protective equipment.</p>
-                      </div>
-                      <label className="switch" aria-label="PPE required">
-                        <input
-                          id="ppe_required"
-                          type="checkbox"
-                          checked={formData.ppe_required}
-                          onChange={(e) => setFormData({ ...formData, ppe_required: e.target.checked })}
-                        />
-                        <span className="switch-track"></span>
-                        <span className="switch-thumb"></span>
-                      </label>
-                    </div>
-                  </div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+                <div>
+                  <label style={{ display: 'block', fontSize: '0.875rem', marginBottom: '8px', color: 'var(--text-main)' }}>
+                    What are your main responsibilities?
+                  </label>
+                  <textarea
+                    placeholder="Briefly describe your daily tasks and responsibilities"
+                    value={formData.responsibilities}
+                    onChange={(e) => setFormData({ ...formData, responsibilities: e.target.value })}
+                    rows={3}
+                    style={{
+                      width: '100%',
+                      padding: '12px 16px',
+                      border: '1px solid #E8F0FF',
+                      borderRadius: '12px',
+                      fontSize: '1rem',
+                      outline: 'none',
+                      transition: 'border-color 0.2s',
+                      resize: 'vertical',
+                    }}
+                    onFocus={(e) => e.target.style.borderColor = accentColor}
+                    onBlur={(e) => e.target.style.borderColor = '#E8F0FF'}
+                  />
                 </div>
-              </section>
-            )}
 
-            {error && <p className="error visible">{error}</p>}
+                <div>
+                  <label style={{ display: 'block', fontSize: '0.875rem', marginBottom: '8px', color: 'var(--text-main)' }}>
+                    Company name
+                  </label>
+                  <input
+                    type="text"
+                    placeholder="Your company name"
+                    value={formData.company_name}
+                    onChange={(e) => setFormData({ ...formData, company_name: e.target.value })}
+                    style={{
+                      width: '100%',
+                      padding: '12px 16px',
+                      border: '1px solid #E8F0FF',
+                      borderRadius: '12px',
+                      fontSize: '1rem',
+                      outline: 'none',
+                      transition: 'border-color 0.2s',
+                    }}
+                    onFocus={(e) => e.target.style.borderColor = accentColor}
+                    onBlur={(e) => e.target.style.borderColor = '#E8F0FF'}
+                  />
+                </div>
 
-            <div className="actions">
-              <button
-                className="btn btn-secondary"
-                type="button"
-                onClick={() => setCurrentStep(currentStep - 1)}
-                disabled={currentStep === 1 || saving}
-                style={{ visibility: currentStep === 1 ? 'hidden' : 'visible' }}
-              >
-                Back
-              </button>
-              <button
-                className="btn btn-primary"
-                type="button"
-                onClick={handleNext}
-                disabled={saving}
-              >
-                {saving ? 'Saving...' : currentStep === 3 ? 'Finish setup' : 'Continue'}
-              </button>
-            </div>
+                <div>
+                  <label style={{ display: 'block', fontSize: '0.875rem', marginBottom: '8px', color: 'var(--text-main)' }}>
+                    Work environment
+                  </label>
+                  <select
+                    value={formData.work_environment}
+                    onChange={(e) => setFormData({ ...formData, work_environment: e.target.value })}
+                    style={{
+                      width: '100%',
+                      padding: '12px 16px',
+                      border: '1px solid #E8F0FF',
+                      borderRadius: '12px',
+                      fontSize: '1rem',
+                      outline: 'none',
+                      transition: 'border-color 0.2s',
+                      backgroundColor: 'white',
+                    }}
+                    onFocus={(e) => e.target.style.borderColor = accentColor}
+                    onBlur={(e) => e.target.style.borderColor = '#E8F0FF'}
+                  >
+                    <option value="">Select work environment</option>
+                    <option>Hybrid</option>
+                    <option>Remote</option>
+                    <option>Office</option>
+                  </select>
+                </div>
+              </div>
+            </motion.div>
+          )}
 
-            <div className="status-note">
-              You can update these details later in your profile.
-            </div>
-          </form>
-        </div>
-      </section>
+          {/* Error message */}
+          {error && (
+            <motion.div
+              initial={{ opacity: 0, y: -10 }}
+              animate={{ opacity: 1, y: 0 }}
+              style={{
+                padding: '12px 16px',
+                background: '#FEE2E2',
+                border: '1px solid #FECACA',
+                borderRadius: '8px',
+                color: '#DC2626',
+                fontSize: '0.875rem',
+                marginTop: '16px',
+              }}
+            >
+              {error}
+            </motion.div>
+          )}
+
+          {/* Navigation buttons */}
+          <div style={{ display: 'flex', gap: '12px', marginTop: '24px' }}>
+            <motion.button
+              type="button"
+              onClick={() => setCurrentStep(currentStep - 1)}
+              disabled={currentStep === 1 || saving}
+              whileHover={{ scale: currentStep === 1 || saving ? 1 : 1.02 }}
+              whileTap={{ scale: currentStep === 1 || saving ? 1 : 0.98 }}
+              style={{
+                flex: 1,
+                padding: '14px',
+                border: '1px solid #E8F0FF',
+                borderRadius: '12px',
+                background: 'white',
+                color: 'var(--text-main)',
+                fontSize: '1rem',
+                cursor: currentStep === 1 || saving ? 'not-allowed' : 'pointer',
+                opacity: currentStep === 1 ? 0.5 : 1,
+                transition: 'all 0.2s',
+              }}
+            >
+              Back
+            </motion.button>
+            <motion.button
+              type="button"
+              onClick={handleNext}
+              disabled={saving}
+              whileHover={{ scale: saving ? 1 : 1.02 }}
+              whileTap={{ scale: saving ? 1 : 0.98 }}
+              style={{
+                flex: 1,
+                padding: '14px',
+                border: 'none',
+                borderRadius: '12px',
+                background: accentColor,
+                color: 'white',
+                fontSize: '1rem',
+                cursor: saving ? 'not-allowed' : 'pointer',
+                opacity: saving ? 0.7 : 1,
+                transition: 'all 0.2s',
+              }}
+            >
+              {saving ? 'Saving...' : currentStep === 2 ? 'Complete setup' : 'Continue'}
+            </motion.button>
+          </div>
+
+          <p style={{ fontSize: '0.75rem', color: 'var(--text-soft)', textAlign: 'center', marginTop: '16px' }}>
+            You can update these details later in your profile
+          </p>
+        </motion.div>
+      </motion.div>
     </main>
   );
 };

@@ -296,6 +296,13 @@ async def analyze_and_extract_optimized(state: PlannerState, planning_llm) -> Pl
         state["pipeline_status"] = "no_action_needed"
         return state
     
+    if detected_tool == "general_conversation":
+        logger.info(f"🚀 OPTIMIZED: General conversation detected, switching to conversational mode")
+        state["detected_tools"] = ["general_conversation"]
+        state["pipeline_status"] = "general_conversation"
+        state["collected_params"] = {}  # Clear params for general conversation
+        return state
+    
     # Parse tool name from response
     valid_tools = get_valid_tools()
     for tool in valid_tools:
@@ -958,17 +965,32 @@ async def create_plan(state: PlannerState, planning_llm) -> PlannerState:
         })
         logger.info(f"🔍 create_plan: adding proxy_tool for meetings_summary_tool with date={date_to_use}")
 
-    # Handle create_event_tool - requires explicit confirmation
-    # Only create plan if user explicitly says "do it", "go ahead", "book it", etc. (using dynamic config)
+    # Handle create_event_tool - TIERED confirmation system
+    # Tier 1: Natural confirmations + all required fields → Execute immediately
+    # Tier 2: Missing fields + natural confirmation → Ask for missing info  
+    # Tier 3: Explicit action phrases → Execute (for re-confirmation situations)
     execution_confirmation_phrases = get_confirmation_phrases("create_event_tool")
     has_explicit_confirmation = any(phrase in user_input_lower for phrase in execution_confirmation_phrases)
+    
+    # Separate natural confirmations from explicit action phrases
+    natural_confirmations = ["yes", "yeah", "yep", "correct", "right", "that's right", "that's correct",
+                             "sounds good", "perfect", "great", "exactly", "absolutely", "sure",
+                             "please do", "please proceed", "okay", "alright", "fine"]
+    explicit_action_phrases = ["do it", "go ahead", "execute it", "proceed", "book it",
+                               "please book", "schedule it", "create it", "that's correct, do it",
+                               "book now", "you can book", "yes book it", "yes do it",
+                               "confirm", "proceed with booking", "proceed with scheduling"]
+    
+    has_natural_confirmation = any(phrase in user_input_lower for phrase in natural_confirmations)
+    has_explicit_action = any(phrase in user_input_lower for phrase in explicit_action_phrases)
     
     if "create_event_tool" in detected_tools or (params.get("date") and params.get("time") and params.get("meeting_mode")) or state.get("tool_specific_state", {}).get("meetings"):
         logger.info(f"🔍 create_plan: handling create_event_tool")
         logger.info(f"🔍 create_plan: meetings={state.get('tool_specific_state', {}).get('meetings')}")
         logger.info(f"🔍 create_plan: params={params}")
         logger.info(f"🔍 create_plan: detected_tools={detected_tools}")
-        logger.info(f"🔍 create_plan: has_explicit_confirmation={has_explicit_confirmation}")
+        logger.info(f"🔍 create_plan: has_natural_confirmation={has_natural_confirmation}")
+        logger.info(f"🔍 create_plan: has_explicit_action={has_explicit_action}")
         
         # Check if all required fields are present (dynamic state access)
         meetings = get_tool_state(state, "create_event_tool")
@@ -990,9 +1012,32 @@ async def create_plan(state: PlannerState, planning_llm) -> PlannerState:
         
         logger.info(f"🔍 create_plan: has_all_required_fields={has_all_required_fields}")
         
-        # Only create plan steps if user explicitly confirmed to book AND all fields are present
-        if not has_explicit_confirmation or not has_all_required_fields:
-            logger.info(f"🔍 create_plan: missing confirmation or required fields, skipping tool execution")
+        # TIERED CONFIRMATION LOGIC:
+        # Tier 1: Natural confirmation + all required fields → Execute
+        # Tier 2: Natural confirmation + missing fields → Ask for missing info
+        # Tier 3: Explicit action phrase → Execute (for re-confirmation)
+        
+        should_execute = False
+        
+        if has_all_required_fields and (has_natural_confirmation or has_explicit_action):
+            # Tier 1 & 3: Execute when we have all fields and any confirmation
+            should_execute = True
+            logger.info(f"🔍 create_plan: TIER 1/3 - all fields present + confirmation, executing")
+        elif has_explicit_action and not has_all_required_fields:
+            # User explicitly wants to proceed but fields are missing → Ask for missing info
+            should_execute = False
+            logger.info(f"🔍 create_plan: explicit action but missing required fields, ask for missing info")
+        elif has_natural_confirmation and not has_all_required_fields:
+            # Tier 2: Natural confirmation but missing fields → Ask for missing info
+            should_execute = False
+            logger.info(f"🔍 create_plan: TIER 2 - natural confirmation but missing fields, ask for missing info")
+        elif not has_explicit_confirmation and not has_natural_confirmation:
+            # No confirmation at all → Don't execute
+            should_execute = False
+            logger.info(f"🔍 create_plan: no confirmation, not executing")
+        
+        if not should_execute:
+            logger.info(f"🔍 create_plan: conditions not met, skipping tool execution")
             # Don't add any plan steps - just return empty plan
             # The LLM will continue gathering information or ask for confirmation
         else:
@@ -1084,6 +1129,12 @@ async def create_plan(state: PlannerState, planning_llm) -> PlannerState:
             }
         })
         logger.info(f"🔍 create_plan: adding proxy_tool for get_weather_tool with city={city}, date={date}")
+    
+    # Handle general_conversation - no tool execution needed, just conversational response
+    if "general_conversation" in detected_tools:
+        logger.info(f"🔍 create_plan: handling general_conversation - no tool execution needed")
+        # No plan needed for general conversation - let the LLM respond naturally
+        pass
 
     state["plan"] = plan
     logger.info(f"🔍 create_plan: created plan with {len(plan)} steps")
@@ -1109,6 +1160,13 @@ async def confirm_action(state: PlannerState, planning_llm) -> PlannerState:
         state["confirmed"] = True
         return state
     
+    # Check if this is general_conversation - no confirmation needed
+    detected_tools = state.get("detected_tools", [])
+    if "general_conversation" in detected_tools:
+        logger.info(f"🔍 confirm_action: general_conversation detected, no confirmation needed")
+        state["confirmed"] = True
+        return state
+    
     # Get the tool name from the plan
     tool_name = plan[0].get("tool", "unknown") if plan else "unknown"
     
@@ -1123,20 +1181,22 @@ async def confirm_action(state: PlannerState, planning_llm) -> PlannerState:
         state["confirmed"] = True
         return state
     
-    # CRITICAL FIX: If we already detected explicit confirmation in create_plan, skip LLM check
-    # BUT ONLY if we also have all required fields - otherwise use LLM to detect if user is confirming
-    # or still providing information
+    # TIERED CONFIRMATION SYSTEM - Check if we already decided in create_plan
+    # If create_plan already set the plan (meaning conditions were met), we can skip LLM check
+    # This is more efficient and avoids duplicate LLM calls
+    
     user_input_lower = user_input.lower()
-    execution_confirmation_phrases = get_confirmation_phrases(actual_tool_name)
-    has_explicit_confirmation = any(phrase in user_input_lower for phrase in execution_confirmation_phrases)
     
-    # Generic confirmation words (yes, right, correct, please) should ALWAYS go through LLM
-    # because the LLM needs to check the bot's previous question to determine intent
-    generic_confirmation_words = ["yes", "yeah", "yep", "right", "correct", "please"]
-    has_generic_confirmation = any(word in user_input_lower for word in generic_confirmation_words)
+    # Separate natural confirmations from explicit action phrases (same as create_plan)
+    natural_confirmations = ["yes", "yeah", "yep", "correct", "right", "that's right", "that's correct",
+                             "sounds good", "perfect", "great", "exactly", "absolutely", "sure",
+                             "please do", "please proceed", "okay", "alright", "fine"]
+    explicit_action_phrases = ["do it", "go ahead", "execute it", "proceed", "book it",
+                               "please book", "schedule it", "create it", "that's correct, do it",
+                               "book now", "you can book", "yes book it", "yes do it",
+                               "confirm", "proceed with booking", "proceed with scheduling"]
     
-    # Explicit action phrases (book it, do it, proceed) can skip LLM if all fields present
-    explicit_action_phrases = ["book it", "do it", "go ahead", "proceed", "schedule it", "create it", "execute it"]
+    has_natural_confirmation = any(phrase in user_input_lower for phrase in natural_confirmations)
     has_explicit_action = any(phrase in user_input_lower for phrase in explicit_action_phrases)
     
     # Check if all required fields are present
@@ -1144,20 +1204,28 @@ async def confirm_action(state: PlannerState, planning_llm) -> PlannerState:
     tool_details = state.get("collected_params", {})
     has_all_required = all(tool_details.get(field) for field in required_fields) if required_fields else True
     
-    # Only skip LLM if we have explicit ACTION confirmation (not just "yes") AND all required fields
-    if has_explicit_action and has_all_required:
-        logger.info(f"🔍 confirm_action: explicit action confirmation detected AND all required fields present, skipping LLM check")
+    # TIERED LOGIC IN confirm_action:
+    # If plan exists (create_plan already decided) → Trust that decision
+    # If plan doesn't exist → Apply tiered logic here
+    
+    if plan:
+        # create_plan already made the decision, trust it
+        logger.info(f"🔍 confirm_action: plan exists from create_plan, trusting its decision")
         state["confirmed"] = True
         return state
     
-    # If user said generic "yes" but all fields present, still use LLM to check bot's previous question
-    if has_generic_confirmation and has_all_required:
-        logger.info(f"🔍 confirm_action: generic 'yes' detected with all fields present, using LLM to check bot's previous question")
-    
-    if has_explicit_confirmation and not has_all_required:
-        logger.info(f"🔍 confirm_action: explicit confirmation detected but missing required fields, using LLM to verify")
-    elif not has_explicit_confirmation:
-        logger.info(f"🔍 confirm_action: no explicit confirmation keyword, using LLM to detect")
+    # No plan exists - apply tiered logic here (shouldn't normally happen with current flow)
+    if has_all_required and (has_natural_confirmation or has_explicit_action):
+        logger.info(f"🔍 confirm_action: TIER 1/3 - all fields + confirmation, confirming")
+        state["confirmed"] = True
+        return state
+    elif has_explicit_action and not has_all_required:
+        logger.info(f"🔍 confirm_action: TIER 3 override - explicit action despite missing fields")
+        state["confirmed"] = True
+        return state
+    else:
+        # Need LLM to determine intent
+        logger.info(f"🔍 confirm_action: using LLM to determine confirmation intent")
     
     # Build collective context for confirmation detection
     user_input = state.get("user_input", "")

@@ -37,7 +37,7 @@ class LangGraphPlanner:
         self.planning_llm = ChatOpenAI(
             api_key=omniroute_api_key,
             base_url=omniroute_base_url,
-            model="groq/llama-3.3-70b-versatile",  # Fast Groq model for better performance
+            model="groq/llama-3.3-70b-versatile",  # Use Groq's strongest Llama 3.3 70B model
             temperature=0.1,
         )
         self.skill_prompts = get_skill_prompts()

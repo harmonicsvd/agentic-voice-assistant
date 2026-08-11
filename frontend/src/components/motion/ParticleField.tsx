@@ -10,7 +10,18 @@ interface Particle {
   delay: number;
 }
 
-export const ParticleField = () => {
+interface ParticleFieldProps {
+  accentColor?: string;
+}
+
+const hexToRgba = (hex: string, alpha: number) => {
+  const r = parseInt(hex.slice(1, 3), 16);
+  const g = parseInt(hex.slice(3, 5), 16);
+  const b = parseInt(hex.slice(5, 7), 16);
+  return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+};
+
+export const ParticleField = ({ accentColor = '#0ea5e9' }: ParticleFieldProps) => {
   const particles = useMemo(() => {
     const particleCount = 25;
     const newParticles: Particle[] = [];
@@ -58,8 +69,9 @@ export const ParticleField = () => {
             width: particle.size,
             height: particle.size,
             borderRadius: '50%',
-            backgroundColor: 'rgba(14, 165, 233, 0.3)',
-            opacity: particle.opacity
+            backgroundColor: hexToRgba(accentColor, 0.3),
+            opacity: particle.opacity,
+            transition: 'background-color 1.5s cubic-bezier(0.4,0,0.2,1)',
           }}
         />
       ))}

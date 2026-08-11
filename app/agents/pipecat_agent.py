@@ -245,7 +245,7 @@ Summary:"""
                     "Content-Type": "application/json"
                 },
                 json={
-                    "model": "groq/llama-3.3-70b-versatile",  # Fast Groq model for better performance
+                    "model": "groq/llama-3.3-70b-versatile",  # Use Groq's strongest Llama 3.3 70B model
                     "messages": [
                         {"role": "system", "content": "You are a helpful assistant. Summarize the following meeting parameters in a single sentence. Be concise."},
                         {"role": "user", "content": summarization_prompt}
@@ -408,10 +408,32 @@ class ToolExecutionProcessor(FrameProcessor):
                 self.active_tool = result["detected_tools"][0] if result["detected_tools"] else None
                 logger.info(f"🎯 Active tool set: {self.active_tool}")
 
+            # Check if general_conversation was detected - this means user wants general advice/chat
+            detected_tools = result.get("detected_tools", [])
+            if "general_conversation" in detected_tools:
+                logger.info(f"💬 General conversation detected - switching to conversational mode")
+                # Clear any accumulated params since this is not meeting-related
+                self.accumulated_params = {}
+                self.active_tool = None
+                # Add a system message to inform the LLM this is general conversation
+                self.context.add_message({
+                    "role": "system",
+                    "content": "The user is asking a general question or seeking advice. Respond naturally and helpfully without trying to force it into a meeting context. Just have a normal conversation."
+                })
+                logger.info(f"📥 Added 'general conversation' message to context")
+                # Add the user's message to context for the LLM to respond
+                self.context.add_message({
+                    "role": "user",
+                    "content": user_input
+                })
+                logger.info(f"📥 Added user message to context for general conversation")
+                # Skip the rest of the tool result handling since there are no results
+                # Continue to the end of the function to let the LLM respond normally
+                result["tool_results"] = []  # Ensure tool_results is empty list to skip result processing
+            
             # Check if no tool was detected - this means the planner decided no action is needed
             # In this case, we should NOT add fake tool results to the context
-            detected_tools = result.get("detected_tools", [])
-            if not detected_tools and not result["tool_results"]:
+            elif not detected_tools and not result["tool_results"]:
                 logger.info(f"🚫 No tool detected and no tool results - skipping fake result injection")
                 # Clear any accumulated params since no action is being taken
                 self.accumulated_params = {}
@@ -422,8 +444,15 @@ class ToolExecutionProcessor(FrameProcessor):
                     "content": "No action was taken. The user's input did not require any tool execution. Respond naturally to continue the conversation."
                 })
                 logger.info(f"📥 Added 'no action taken' message to context")
-                # Skip the rest of the tool result handling
-                return
+                # Add the user's message to context for the LLM to respond
+                self.context.add_message({
+                    "role": "user",
+                    "content": user_input
+                })
+                logger.info(f"📥 Added user message to context for conversational response")
+                # Skip the rest of the tool result handling since there are no results
+                # Continue to the end of the function to let the LLM respond normally
+                result["tool_results"] = []  # Ensure tool_results is empty list to skip result processing
 
             # Handle tool results or lack thereof
             if result["tool_results"]:
@@ -582,12 +611,12 @@ def create_voice_agent_pipeline(transport, user_sub: str = None):
         api_key=omniroute_api_key,
         base_url=omniroute_base_url,
         settings=OpenAILLMService.Settings(
-            model="groq/llama-3.3-70b-versatile",  # Fast Groq model for better performance
+            model="groq/llama-3.3-70b-versatile",  # Use Groq's strongest Llama 3.3 70B model
             temperature=0,
             system_instruction=system_prompt,
         ),
     )
-    logger.info("OmniRoute LLM service initialized with auto-routing")
+    logger.info("OmniRoute LLM service initialized with Groq Llama 3.3 70B")
     
     # Initialize TTS service (Piper - open source)
     tts = PiperTTSService(

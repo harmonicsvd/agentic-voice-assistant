@@ -11,12 +11,12 @@ export const Profile = () => {
   const [success, setSuccess] = useState('');
   const [profile, setProfile] = useState({
     email: '',
-    role: '',
-    default_city: '',
-    timezone: '',
-    commute_mode: '',
-    risk_tolerance: '',
-    ppe_required: false,
+    name: '',
+    work_description: '',
+    industry: '',
+    responsibilities: '',
+    company_name: '',
+    work_environment: '',
   });
   const [editMode, setEditMode] = useState(false);
 
@@ -180,14 +180,11 @@ export const Profile = () => {
               </div>
 
               <div>
-                <label className="block text-[var(--text-soft)] text-sm font-medium mb-2 flex items-center gap-2">
-                  <Briefcase className="w-4 h-4 text-[var(--teal)]" />
-                  Role
-                </label>
+                <label className="block text-[var(--text-soft)] text-sm font-medium mb-2">Name</label>
                 <input
                   type="text"
-                  value={profile.role}
-                  onChange={(e) => setProfile({ ...profile, role: e.target.value })}
+                  value={profile.name}
+                  onChange={(e) => setProfile({ ...profile, name: e.target.value })}
                   disabled={!editMode}
                   className="w-full px-4 py-3 bg-[var(--bg-sand)] border border-[var(--line)] rounded-xl text-[var(--text-main)] disabled:opacity-60 focus:outline-none focus:ring-2 focus:ring-[var(--teal)] transition-colors"
                 />

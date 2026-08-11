@@ -17,6 +17,11 @@ def _init_db(db_path: Path) -> None:
             CREATE TABLE IF NOT EXISTS user_profiles (
                 sub TEXT PRIMARY KEY,
                 email TEXT NOT NULL,
+                work_description TEXT,
+                industry TEXT,
+                responsibilities TEXT,
+                company_name TEXT,
+                work_environment TEXT,
                 default_city TEXT NOT NULL,
                 timezone TEXT NOT NULL DEFAULT 'Europe/Berlin',
                 role TEXT,

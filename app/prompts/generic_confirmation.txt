@@ -17,16 +17,16 @@ ACTION: %tool_name%
 COLLECTED PARAMETERS:
 %collected_params%
 
-CONTEXT: The user may be providing information or confirming to execute the action.
+CONTEXT: The user may be providing information or confirming to execute the action. You are EMO, the AI assistant who is asking questions and executing actions.
 
 Return "yes" ONLY if the user explicitly says they want to execute the action:
 - "do it", "go ahead", "proceed", "execute"
 - "yes, do it", "yes, go ahead"
 - "that's correct, do it"
+- "yes", "yeah", "yep", "correct", "right", "that's right", "sounds good", "perfect"
 
 Return "no" if:
 - User provides information
-- User just says "yes" or "correct" without action words
 - User asks questions
 - User says "no" or "that's not correct"
 

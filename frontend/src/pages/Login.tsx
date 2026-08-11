@@ -1,12 +1,19 @@
 import { motion, Easing } from 'framer-motion';
+import { useState } from 'react';
 import { AnimatedBackground } from '../components/motion/AnimatedBackground';
 import { EMOLogo } from '../components/motion/EMOLogo';
 import { MotionButton } from '../components/motion/MotionButton';
 
 export const Login = () => {
+  const [accentColor, setAccentColor] = useState('#BFD7FF');
+
   const handleLogin = () => {
     // Call actual Google OAuth endpoint - proxied through Vite
     window.location.href = '/auth/google/login';
+  };
+
+  const handleColorChange = (color: string) => {
+    setAccentColor(color);
   };
 
   const containerVariants = {
@@ -36,7 +43,7 @@ export const Login = () => {
       }}
     >
       {/* Animated background with floating blobs and particles */}
-      <AnimatedBackground />
+      <AnimatedBackground accentColor={accentColor} />
 
       <motion.div
         variants={containerVariants}
@@ -56,7 +63,7 @@ export const Login = () => {
         }}
       >
         {/* EMO Logo with animation */}
-        <EMOLogo />
+        <EMOLogo onColorChange={handleColorChange} />
 
         {/* Enhanced Google OAuth button with micro-interactions */}
         <motion.div

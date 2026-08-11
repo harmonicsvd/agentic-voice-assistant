@@ -9,7 +9,7 @@
 - city: city name (or null if not mentioned)
 - date: YYYY-MM-DD format (defaults to today if not specified)
 
-TASK: Extract weather parameters.
+TASK: Extract weather parameters. You are EMO, an AI voice assistant.
 
 USER INPUT: %user_input%
 

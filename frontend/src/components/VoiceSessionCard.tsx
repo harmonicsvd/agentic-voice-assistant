@@ -1,11 +1,12 @@
 import { useState, useEffect } from 'react';
 import { PipecatClient, RTVIEvent } from '@pipecat-ai/client-js';
-import LottieCharacter from './characters/LottieCharacter';
+import { VoiceEmoji } from './motion/VoiceEmoji';
 import { UI_CONFIG, CharacterState } from '../config/ui-config';
 
 interface VoiceSessionCardProps {
   userSub: string;
   client: PipecatClient;
+  onColorChange?: (color: string) => void;
 }
 
 interface Meeting {
@@ -15,9 +16,9 @@ interface Meeting {
   time: string;
 }
 
-export const VoiceSessionCard = ({ userSub, client }: VoiceSessionCardProps) => {
+export const VoiceSessionCard = ({ userSub, client, onColorChange }: VoiceSessionCardProps) => {
   const [meetings, setMeetings] = useState<Meeting[]>([]);
-  const [status, setStatus] = useState('');
+  const [status, setStatus] = useState('Sleeping');
   const [btnLabel, setBtnLabel] = useState(UI_CONFIG.voiceSession.buttonLabels.startCall);
   const [btnHint, setBtnHint] = useState(UI_CONFIG.voiceSession.buttonHints.idle);
   
@@ -26,6 +27,7 @@ export const VoiceSessionCard = ({ userSub, client }: VoiceSessionCardProps) => 
   const [isLoading, setIsLoading] = useState(false);
   const [botReady, setBotReady] = useState(false);
   const [isFirstResponse, setIsFirstResponse] = useState(true); // Track first response
+  const [hasWokenUp, setHasWokenUp] = useState(false); // Track if bot has woken up once
 
   const [jerryState, setJerryState] = useState<CharacterState>('idle');
 
@@ -34,36 +36,68 @@ export const VoiceSessionCard = ({ userSub, client }: VoiceSessionCardProps) => 
     if (!client) return;
 
     const handleUserStartedSpeaking = () => {
-      if (isRecording && botReady) setJerryState('thinking'); // User speaks → thinking
+      if (isRecording && botReady) {
+        setJerryState('listening'); // User speaks → listening
+        setStatus('Listening');
+      }
     };
     const handleUserStoppedSpeaking = () => {
-      if (isRecording && botReady) setJerryState('success'); // User stops → smile (agent ready)
+      if (isRecording && botReady) {
+        setJerryState('thinking'); // User stops → thinking
+        setStatus('Thinking');
+      }
     };
     const handleBotLlmStarted = () => {
-      if (isRecording && botReady && !isFirstResponse) setJerryState('processing'); // Bot searching → monocle (skip first response)
+      if (isRecording && botReady) {
+        setJerryState('processing'); // Bot searching → processing
+        setStatus('Processing');
+      }
     };
     const handleFunctionCallStarted = () => {
-      if (isRecording && botReady) setJerryState('processing'); // Function call → monocle
+      if (isRecording && botReady) {
+        setJerryState('processing'); // Function call → processing
+        setStatus('Processing');
+      }
     };
     const handleBotTtsStarted = () => {
       if (isRecording && botReady) {
-        setJerryState('speaking'); // Bot speaks → smile
+        setJerryState('processing'); // Show processing while TTS generates
+        setStatus('Processing');
+      }
+    };
+    const handleBotStartedSpeaking = () => {
+      if (isRecording && botReady) {
+        setJerryState('speaking'); // Bot speaks → speaking (when audio actually plays)
+        setStatus('Speaking');
         setIsFirstResponse(false); // Reset after first response
       }
     };
-    const handleBotTtsStopped = () => {
-      if (isRecording && botReady) setJerryState('success'); // Bot stops → smile (ready)
+    const handleBotStoppedSpeaking = () => {
+      if (isRecording && botReady) {
+        setJerryState('listening'); // Bot stops → listening (waiting for user)
+        setStatus('Listening');
+      }
     };
     const handleBotReady = () => {
       setBotReady(true);
-      setJerryState('success'); // Bot ready → smile (agent speaking)
+      if (!hasWokenUp) {
+        setJerryState('success'); // Bot ready → ready (only on first wake up)
+        setStatus('Ready');
+        setHasWokenUp(true);
+      } else {
+        setJerryState('listening'); // After first wake up, go to listening
+        setStatus('Listening');
+      }
     };
     const handleBotDisconnected = () => {
       setBotReady(false);
+      setHasWokenUp(false); // Reset wake up flag
       setJerryState('idle'); // Bot disconnected → sleeping
+      setStatus('Sleeping');
     };
     const handleError = () => {
       setJerryState('error');
+      setStatus('Error');
     };
 
     client.on(RTVIEvent.UserStartedSpeaking, handleUserStartedSpeaking);
@@ -71,7 +105,8 @@ export const VoiceSessionCard = ({ userSub, client }: VoiceSessionCardProps) => 
     client.on(RTVIEvent.BotLlmStarted, handleBotLlmStarted);
     client.on(RTVIEvent.LLMFunctionCallStarted, handleFunctionCallStarted);
     client.on(RTVIEvent.BotTtsStarted, handleBotTtsStarted);
-    client.on(RTVIEvent.BotTtsStopped, handleBotTtsStopped);
+    client.on(RTVIEvent.BotStartedSpeaking, handleBotStartedSpeaking);
+    client.on(RTVIEvent.BotStoppedSpeaking, handleBotStoppedSpeaking);
     client.on(RTVIEvent.BotReady, handleBotReady);
     client.on(RTVIEvent.BotDisconnected, handleBotDisconnected);
     client.on(RTVIEvent.Error, handleError);
@@ -82,12 +117,13 @@ export const VoiceSessionCard = ({ userSub, client }: VoiceSessionCardProps) => 
       client.off(RTVIEvent.BotLlmStarted, handleBotLlmStarted);
       client.off(RTVIEvent.LLMFunctionCallStarted, handleFunctionCallStarted);
       client.off(RTVIEvent.BotTtsStarted, handleBotTtsStarted);
-      client.off(RTVIEvent.BotTtsStopped, handleBotTtsStopped);
+      client.off(RTVIEvent.BotStartedSpeaking, handleBotStartedSpeaking);
+      client.off(RTVIEvent.BotStoppedSpeaking, handleBotStoppedSpeaking);
       client.off(RTVIEvent.BotReady, handleBotReady);
       client.off(RTVIEvent.BotDisconnected, handleBotDisconnected);
       client.off(RTVIEvent.Error, handleError);
     };
-  }, [client, isRecording, botReady, isFirstResponse]);
+  }, [client, isRecording, botReady, hasWokenUp]);
 
   const toggleRecording = async () => {
     if (isRecording) {
@@ -100,12 +136,14 @@ export const VoiceSessionCard = ({ userSub, client }: VoiceSessionCardProps) => 
   const startRecording = async () => {
     try {
       setIsLoading(true);
-      setStatus(UI_CONFIG.voiceSession.statusMessages.connecting);
-      setJerryState(UI_CONFIG.voiceSession.characterStates.idle); // Show sleepy face when turning on (until agent speaks)
+      setStatus('Waking up');
+      setJerryState('idle'); // Show sleepy face when turning on (until agent speaks)
       setIsFirstResponse(true); // Reset first response flag
+      setHasWokenUp(false); // Reset wake up flag
 
       if (!client) {
-        setStatus(UI_CONFIG.voiceSession.statusMessages.clientNotAvailable);
+        setStatus('Error');
+        setJerryState('error');
         return;
       }
 
@@ -115,10 +153,12 @@ export const VoiceSessionCard = ({ userSub, client }: VoiceSessionCardProps) => 
       setIsRecording(true);
       setBtnLabel(UI_CONFIG.voiceSession.buttonLabels.endCall);
       setBtnHint(UI_CONFIG.voiceSession.buttonHints.listening);
-      setStatus(UI_CONFIG.voiceSession.statusMessages.listening);
+      setStatus('Listening');
+      setJerryState('listening');
     } catch (err) {
       console.error(err);
-      setStatus(UI_CONFIG.voiceSession.statusMessages.failed);
+      setStatus('Error');
+      setJerryState('error');
     } finally {
       setIsLoading(false);
     }
@@ -129,11 +169,11 @@ export const VoiceSessionCard = ({ userSub, client }: VoiceSessionCardProps) => 
       if (!client) return;
 
       setBotReady(false);
-      setJerryState(UI_CONFIG.voiceSession.characterStates.idle);
+      setJerryState('idle');
+      setStatus('Sleeping');
       await client.disconnect();
       setIsConnected(false);
       setIsRecording(false);
-      setStatus(UI_CONFIG.voiceSession.statusMessages.disconnected);
       setBtnLabel(UI_CONFIG.voiceSession.buttonLabels.startCall);
       setBtnHint(UI_CONFIG.voiceSession.buttonHints.disconnected);
     } catch (err) {
@@ -172,7 +212,7 @@ export const VoiceSessionCard = ({ userSub, client }: VoiceSessionCardProps) => 
     }}>
       {/* Emoji Character */}
       <div className="lottie-character" style={{width: '200px', height: '200px'}}>
-        <LottieCharacter state={jerryState} />
+        <VoiceEmoji state={jerryState} onColorChange={onColorChange} />
       </div>
 
       {/* Status Text */}

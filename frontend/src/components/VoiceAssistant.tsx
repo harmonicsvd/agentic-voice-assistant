@@ -1,14 +1,21 @@
 import { useState, useEffect, useRef } from 'react';
+import { motion, Easing } from 'framer-motion';
 import { PipecatClient } from '@pipecat-ai/client-js';
 import { WebSocketTransport, ProtobufFrameSerializer } from '@pipecat-ai/websocket-transport';
 import { VoiceSessionCard } from './VoiceSessionCard';
+import { AnimatedBackground } from './motion/AnimatedBackground';
 
 export const VoiceAssistant = () => {
   const [userSub, setUserSub] = useState('');
   const [client, setClient] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [accentColor, setAccentColor] = useState('#F59E0B'); // Default orange for sleeping state
   const clientRef = useRef<any>(null);
+
+  const handleColorChange = (color: string) => {
+    setAccentColor(color);
+  };
 
   useEffect(() => {
     // Get user sub from auth - only run once on mount
@@ -71,52 +78,17 @@ export const VoiceAssistant = () => {
         overflow: 'hidden',
       }}
     >
-      {/* Blue patches / soft blobs */}
-      <div
-        aria-hidden="true"
-        style={{
-          position: 'absolute',
-          top: '-120px',
-          left: '-100px',
-          width: '420px',
-          height: '420px',
-          borderRadius: '50%',
-          background: 'radial-gradient(circle, #BFD7FF 0%, rgba(191,215,255,0) 70%)',
-          filter: 'blur(10px)',
-          pointerEvents: 'none',
-        }}
-      />
-      <div
-        aria-hidden="true"
-        style={{
-          position: 'absolute',
-          bottom: '-140px',
-          right: '-120px',
-          width: '480px',
-          height: '480px',
-          borderRadius: '50%',
-          background: 'radial-gradient(circle, #DCE9FF 0%, rgba(220,233,255,0) 70%)',
-          filter: 'blur(10px)',
-          pointerEvents: 'none',
-        }}
-      />
-      <div
-        aria-hidden="true"
-        style={{
-          position: 'absolute',
-          top: '35%',
-          right: '8%',
-          width: '220px',
-          height: '220px',
-          borderRadius: '50%',
-          background: 'radial-gradient(circle, #A9C9FF 0%, rgba(169,201,255,0) 75%)',
-          filter: 'blur(8px)',
-          pointerEvents: 'none',
-        }}
-      />
+      {/* Animated background with floating blobs and particles */}
+      <AnimatedBackground accentColor={accentColor} />
 
-      {/* Navigation Header */}
-      <nav
+      {/* Film grain overlay */}
+      <div className="film-grain" aria-hidden="true" />
+
+      {/* Enhanced Navigation Header with motion */}
+      <motion.nav
+        initial={{ y: -20, opacity: 0 }}
+        animate={{ y: 0, opacity: 1 }}
+        transition={{ duration: 0.6, ease: "easeOut" as Easing }}
         style={{
           position: 'fixed',
           top: 0,
@@ -126,50 +98,58 @@ export const VoiceAssistant = () => {
           alignItems: 'center',
           justifyContent: 'space-between',
           padding: '16px 32px',
-          background: 'white',
-          borderBottom: '1px solid #E8F0FF',
+          background: 'rgba(255, 255, 255, 0.85)',
+          backdropFilter: 'blur(12px)',
+          borderBottom: '1px solid rgba(232, 240, 255, 0.6)',
           zIndex: 100,
         }}
       >
-        <div style={{display: 'flex', alignItems: 'center', gap: '12px'}}>
-          <button
+        <motion.div 
+          style={{display: 'flex', alignItems: 'center', gap: '12px'}}
+          initial={{ x: -20, opacity: 0 }}
+          animate={{ x: 0, opacity: 1 }}
+          transition={{ duration: 0.6, ease: "easeOut" as Easing, delay: 0.2 }}
+        >
+          <motion.button
             onClick={() => window.location.href = '/profile'}
+            whileHover={{ scale: 1.05, backgroundColor: 'rgba(247, 249, 252, 0.9)' }}
+            whileTap={{ scale: 0.95 }}
             style={{
               padding: '10px 20px',
               background: 'white',
-              border: '1px solid #E8F0FF',
-              borderRadius: '8px',
+              border: '1px solid rgba(232, 240, 255, 0.8)',
+              borderRadius: '12px',
               color: '#14213D',
               fontSize: '0.875rem',
-              fontWeight: 500,
+              fontWeight: 600,
               cursor: 'pointer',
               transition: 'all 0.2s',
+              boxShadow: '0 2px 8px rgba(20, 33, 61, 0.04)',
             }}
-            onMouseOver={(e) => e.currentTarget.style.background = '#F7F9FC'}
-            onMouseOut={(e) => e.currentTarget.style.background = 'white'}
           >
             Profile
-          </button>
-          <button
+          </motion.button>
+          <motion.button
             onClick={() => window.location.href = '/documents'}
+            whileHover={{ scale: 1.05, backgroundColor: 'rgba(247, 249, 252, 0.9)' }}
+            whileTap={{ scale: 0.95 }}
             style={{
               padding: '10px 20px',
               background: 'white',
-              border: '1px solid #E8F0FF',
-              borderRadius: '8px',
+              border: '1px solid rgba(232, 240, 255, 0.8)',
+              borderRadius: '12px',
               color: '#14213D',
               fontSize: '0.875rem',
-              fontWeight: 500,
+              fontWeight: 600,
               cursor: 'pointer',
               transition: 'all 0.2s',
+              boxShadow: '0 2px 8px rgba(20, 33, 61, 0.04)',
             }}
-            onMouseOver={(e) => e.currentTarget.style.background = '#F7F9FC'}
-            onMouseOut={(e) => e.currentTarget.style.background = 'white'}
           >
             Documents
-          </button>
-        </div>
-        <button
+          </motion.button>
+        </motion.div>
+        <motion.button
           onClick={async () => {
             try {
               await fetch('/auth/logout', {
@@ -180,26 +160,33 @@ export const VoiceAssistant = () => {
               window.location.href = '/login';
             }
           }}
+          whileHover={{ scale: 1.05, backgroundColor: 'rgba(254, 242, 242, 0.9)' }}
+          whileTap={{ scale: 0.95 }}
+          initial={{ x: 20, opacity: 0 }}
+          animate={{ x: 0, opacity: 1 }}
+          transition={{ duration: 0.6, ease: "easeOut" as Easing, delay: 0.3 }}
           style={{
             padding: '10px 20px',
             background: 'white',
-            border: '1px solid #E8F0FF',
-            borderRadius: '8px',
+            border: '1px solid rgba(232, 240, 255, 0.8)',
+            borderRadius: '12px',
             color: '#DC2626',
             fontSize: '0.875rem',
-            fontWeight: 500,
+            fontWeight: 600,
             cursor: 'pointer',
             transition: 'all 0.2s',
+            boxShadow: '0 2px 8px rgba(20, 33, 61, 0.04)',
           }}
-          onMouseOver={(e) => e.currentTarget.style.background = '#FEF2F2'}
-          onMouseOut={(e) => e.currentTarget.style.background = 'white'}
         >
           Logout
-        </button>
-      </nav>
+        </motion.button>
+      </motion.nav>
 
       {/* Main Content */}
-      <div
+      <motion.div
+        initial={{ opacity: 0, y: 20 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.8, ease: "easeOut" as Easing, delay: 0.4 }}
         style={{
           position: 'relative',
           zIndex: 1,
@@ -212,7 +199,12 @@ export const VoiceAssistant = () => {
         }}
       >
         {loading && (
-          <div style={{textAlign: 'center'}}>
+          <motion.div 
+            initial={{ opacity: 0, scale: 0.9 }}
+            animate={{ opacity: 1, scale: 1 }}
+            transition={{ duration: 0.5, ease: "easeOut" as Easing }}
+            style={{textAlign: 'center'}}
+          >
             <div style={{
               width: '48px',
               height: '48px',
@@ -222,27 +214,34 @@ export const VoiceAssistant = () => {
               animation: 'spin 1s linear infinite',
               margin: '0 auto 16px'
             }}></div>
-            <p style={{color: '#64748B', marginTop: '16px'}}>Connecting to your assistant...</p>
-          </div>
+            <p style={{color: '#64748B', marginTop: '16px', fontSize: '1rem', fontWeight: 500}}>Connecting to your assistant...</p>
+          </motion.div>
         )}
         
         {error && (
-          <div style={{
-            background: 'white',
-            padding: '24px 32px',
-            borderRadius: '16px',
-            border: '1px solid #FFD6D6',
-            maxWidth: '400px',
-            textAlign: 'center'
-          }}>
+          <motion.div 
+            initial={{ opacity: 0, scale: 0.9 }}
+            animate={{ opacity: 1, scale: 1 }}
+            transition={{ duration: 0.5, ease: "easeOut" as Easing }}
+            style={{
+              background: 'rgba(255, 255, 255, 0.9)',
+              backdropFilter: 'blur(12px)',
+              padding: '24px 32px',
+              borderRadius: '20px',
+              border: '1px solid #FFD6D6',
+              maxWidth: '400px',
+              textAlign: 'center',
+              boxShadow: '0 12px 40px rgba(220, 38, 38, 0.1)'
+            }}
+          >
             <div style={{fontSize: '2rem', marginBottom: '8px'}}>⚠️</div>
-            <h3 style={{color: '#DC2626', marginBottom: '8px'}}>Connection failed</h3>
+            <h3 style={{color: '#DC2626', marginBottom: '8px', fontFamily: '"Space Grotesk", sans-serif'}}>Connection failed</h3>
             <p style={{color: '#64748B'}}>{error}</p>
-          </div>
+          </motion.div>
         )}
         
-        {!loading && !error && client && <VoiceSessionCard userSub={userSub} client={client} />}
-      </div>
+        {!loading && !error && client && <VoiceSessionCard userSub={userSub} client={client} onColorChange={handleColorChange} />}
+      </motion.div>
     </main>
   );
 };
