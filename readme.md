@@ -99,7 +99,8 @@ python -m uvicorn apps.api.main:app --reload
 
 ### **Environment Variables**
 - `DATABASE_URL`: Supabase PostgreSQL connection string (shared with backend)
-- `GROQ_API_KEY`: Groq API key for LLM
+- `OMNIROUTE_API_KEY`: OmniRoute API key (optional - use "free" for no-auth providers)
+- `OMNIROUTE_BASE_URL`: OmniRoute base URL (default: `http://localhost:20128/v1`)
 - `GOOGLE_OAUTH_CLIENT_ID`: Google OAuth client ID (shared with backend)
 - `GOOGLE_OAUTH_CLIENT_SECRET`: Google OAuth client secret (shared with backend)
 - `APP_SECRET_KEY`: FastAPI secret key

@@ -24,10 +24,20 @@ class LangGraphPlanner:
         self.tool_cache = {}  # Cache for recent tool executions: {(tool_name, params_hash): (result, timestamp)}
         self.cache_ttl = 30  # Cache time-to-live in seconds
         
+        # Use OmniRoute for multi-provider routing with free tier optimization
+        # When REQUIRE_API_KEY=false in OmniRoute config, no API key needed
+        # Otherwise use "free" placeholder for no-auth providers
+        omniroute_api_key = os.getenv("OMNIROUTE_API_KEY", "free")  # Can be empty string if REQUIRE_API_KEY=false
+        omniroute_base_url = os.getenv("OMNIROUTE_BASE_URL", "http://localhost:20128/v1")
+        
+        # If API key is empty, use a placeholder for OpenAI client compatibility
+        if not omniroute_api_key:
+            omniroute_api_key = "free"
+        
         self.planning_llm = ChatOpenAI(
-            api_key=os.getenv("GROQ_API_KEY"),
-            base_url="https://api.groq.com/openai/v1",
-            model="llama-3.1-8b-instant",
+            api_key=omniroute_api_key,
+            base_url=omniroute_base_url,
+            model="groq/llama-3.3-70b-versatile",  # Fast Groq model for better performance
             temperature=0.1,
         )
         self.skill_prompts = get_skill_prompts()

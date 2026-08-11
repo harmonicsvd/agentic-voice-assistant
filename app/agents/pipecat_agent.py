@@ -225,23 +225,27 @@ Example outputs:
 Summary:"""
 
     try:
-        # Use Groq API for summarization
+        # Use OmniRoute API for summarization with multi-provider routing
+        # When REQUIRE_API_KEY=false in OmniRoute config, no API key needed
+        # Otherwise use "free" placeholder for no-auth providers
         import httpx
         import os
-        groq_api_key = os.getenv("GROQ_API_KEY")
-        if not groq_api_key:
-            logger.error("❌ GROQ_API_KEY not set")
-            return _generate_param_summary(params)
-
+        omniroute_api_key = os.getenv("OMNIROUTE_API_KEY", "free")
+        omniroute_base_url = os.getenv("OMNIROUTE_BASE_URL", "http://localhost:20128/v1")
+        
+        # If API key is empty, use a placeholder for HTTP client compatibility
+        if not omniroute_api_key:
+            omniroute_api_key = "free"
+        
         async with httpx.AsyncClient() as client:
             response = await client.post(
-                "https://api.groq.com/openai/v1/chat/completions",
+                f"{omniroute_base_url}/chat/completions",
                 headers={
-                    "Authorization": f"Bearer {groq_api_key}",
+                    "Authorization": f"Bearer {omniroute_api_key}",
                     "Content-Type": "application/json"
                 },
                 json={
-                    "model": "llama-3.1-8b-instant",
+                    "model": "groq/llama-3.3-70b-versatile",  # Fast Groq model for better performance
                     "messages": [
                         {"role": "system", "content": "You are a helpful assistant. Summarize the following meeting parameters in a single sentence. Be concise."},
                         {"role": "user", "content": summarization_prompt}
@@ -497,19 +501,7 @@ class ToolExecutionProcessor(FrameProcessor):
                 self.active_tool = None  # Reset active tool after completion
             else:
                 # No tool executed - this is just conversation
-                logger.info(f"� No tool execution - passing transcription to LLM")
-                
-                # Add context about collected parameters to help Ram understand the conversation state
-                if self.accumulated_params and self.active_tool:
-                    # Use dynamic context formatter from tool config
-                    context_msg = get_formatted_context(self.active_tool, self.accumulated_params)
-                    
-                    if context_msg:
-                        # Add as system message to give Ram visibility into what's been collected
-                        self.context.add_messages([{"role": "system", "content": context_msg}])
-                        logger.info(f"🧠 Added parameter context to Ram ({self.active_tool}): {context_msg[:100]}...")
-                # No tool executed - this is just conversation
-                logger.info(f"� No tool execution - passing transcription to LLM")
+                logger.info(f"🚫 No tool execution - passing transcription to LLM")
                 
                 # Add context about collected parameters to help Ram understand the conversation state
                 if self.accumulated_params and self.active_tool:
@@ -545,9 +537,14 @@ def create_voice_agent_pipeline(transport, user_sub: str = None):
     current_day = datetime.now().strftime("%A")
 
     # Get API keys from environment
-    groq_api_key = os.getenv("GROQ_API_KEY")
-    if not groq_api_key:
-        raise ValueError("GROQ_API_KEY not set in environment variables")
+    # When REQUIRE_API_KEY=false in OmniRoute config, no API key needed
+    # Otherwise use "free" placeholder for no-auth providers
+    omniroute_api_key = os.getenv("OMNIROUTE_API_KEY", "free")
+    omniroute_base_url = os.getenv("OMNIROUTE_BASE_URL", "http://localhost:20128/v1")
+    
+    # If API key is empty, use a placeholder for Pipecat client compatibility
+    if not omniroute_api_key:
+        omniroute_api_key = "free"
 
     # Initialize STT service (Whisper)
     stt = WhisperSTTService(
@@ -580,17 +577,17 @@ def create_voice_agent_pipeline(transport, user_sub: str = None):
             logger.warning(f"Could not load simplified prompt: {e2}, using fallback")
             system_prompt = f"""You are Ram, a helpful voice assistant. Today is {current_date} ({current_day}). Keep responses brief."""
 
-    # Initialize LLM service with Groq (using OpenAI-compatible interface)
+    # Initialize LLM service with OmniRoute (using OpenAI-compatible interface)
     llm = OpenAILLMService(
-        api_key=groq_api_key,
-        base_url="https://api.groq.com/openai/v1",
+        api_key=omniroute_api_key,
+        base_url=omniroute_base_url,
         settings=OpenAILLMService.Settings(
-            model="llama-3.3-70b-versatile",
+            model="groq/llama-3.3-70b-versatile",  # Fast Groq model for better performance
             temperature=0,
             system_instruction=system_prompt,
         ),
     )
-    logger.info("Groq LLM service initialized with llama-3.3-70b-versatile")
+    logger.info("OmniRoute LLM service initialized with auto-routing")
     
     # Initialize TTS service (Piper - open source)
     tts = PiperTTSService(
