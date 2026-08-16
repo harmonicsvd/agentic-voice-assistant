@@ -1,10 +1,10 @@
 import { useNavigate } from 'react-router-dom';
 
 interface BrandBarProps {
-  userSub: string;
+  userSub?: string; // Made optional since not currently used
 }
 
-export const BrandBar = ({ userSub }: BrandBarProps) => {
+export const BrandBar = ({ userSub: _userSub }: BrandBarProps) => {
   const navigate = useNavigate();
 
   const handleLogout = async () => {

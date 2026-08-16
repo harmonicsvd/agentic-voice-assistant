@@ -30,7 +30,7 @@ CRITICAL RULES FOR TOOL DETECTION:
 - Detect tools based on clear user intent to perform an action
 - Casual conversation like "take a break", "are you there?", "hello", "thanks" → return "none"
 - Greetings and small talk → return "none"
-- Confirmations like "yes", "okay", "sounds good" → return "none" (let main LLM handle conversation)
+- CRITICAL: If existing_params shows an incomplete create_event_tool in progress AND user says "yes", "yeah", "please book it", "go ahead", "do it", etc., return the SAME tool (create_event_tool) with preserved existing_params - this is a CONFIRMATION, not "none"
 - If user is asking questions about meetings/calendar that were just discussed, treat as continuation context
 
 OUTPUT FORMAT (JSON):
@@ -51,8 +51,8 @@ PARAMETER EXTRACTION RULES FOR create_event_tool:
 - time: HH:MM format (24-hour)
 - duration: duration string (e.g., "1 hour", "30 minutes", "2 hours")
 - meeting_mode: "online" or "in-person"
-- name: contact person name (REQUIRED - who is the meeting with?)
-- title: meeting title (brief and descriptive)
+- name: contact person name (CRITICAL REQUIRED FIELD - who is the meeting with? Look for patterns like "with John", "meeting with Smith", "talk to Alex", etc.)
+- title: meeting title (brief and descriptive - can be generated from description if not provided)
 - description: meeting purpose/details (natural language)
 - location: physical location (for in-person meetings)
 - city: city name
@@ -73,6 +73,8 @@ INTELLIGENT BEHAVIOR:
 - Detect general conversation: questions about advice, tips, general knowledge, personal development, hobbies, etc. → general_conversation
 - CRITICAL: Use existing parameters as base, only update what's explicitly mentioned
 - CRITICAL: If a parameter is not mentioned in the current input but exists in existing_params, PRESERVE the existing value instead of returning null
+- CRITICAL: When user confirms (says "yes", "please book it", etc.) and existing_params has incomplete data, preserve ALL existing_params and return the same tool - do NOT return "none"
+- CRITICAL: The "name" field is REQUIRED for create_event_tool. If it's missing from existing_params, do NOT mark the tool as ready for execution. Extract it from patterns like "with [Name]", "meeting with [Name]", "talk to [Name]", etc.
 - Only return null for parameters that have never been mentioned at all
 - Be conservative: if unsure about a parameter, don't invent values
 

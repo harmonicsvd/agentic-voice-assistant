@@ -1,71 +1,173 @@
 import { useState, useEffect, useRef } from 'react';
 import { motion, Easing } from 'framer-motion';
-import { PipecatClient } from '@pipecat-ai/client-js';
+import { PipecatClient, RTVIEvent } from '@pipecat-ai/client-js';
 import { WebSocketTransport, ProtobufFrameSerializer } from '@pipecat-ai/websocket-transport';
 import { VoiceSessionCard } from './VoiceSessionCard';
 import { AnimatedBackground } from './motion/AnimatedBackground';
+import { ResponsiveNav } from './ResponsiveNav';
+
 
 export const VoiceAssistant = () => {
   const [userSub, setUserSub] = useState('');
   const [client, setClient] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [accentColor, setAccentColor] = useState('#F59E0B'); // Default orange for sleeping state
+  const [sleepStatus, setSleepStatus] = useState<string | undefined>(undefined); // Don't set initial status
   const clientRef = useRef<any>(null);
 
-  const handleColorChange = (color: string) => {
-    setAccentColor(color);
-  };
+ useEffect(() => {
+  // Get user sub from auth - only run once on mount
+  const fetchUser = async () => {
+    try {
+      const res = await fetch('/auth/me', { credentials: 'include' });
+      if (res.status === 200) {
+        const me = await res.json();
+        const sub = me.user?.sub || '';
+        setUserSub(sub);
 
-  useEffect(() => {
-    // Get user sub from auth - only run once on mount
-    const fetchUser = async () => {
-      try {
-        const res = await fetch('/auth/me', { credentials: 'include' });
-        if (res.status === 200) {
-          const me = await res.json();
-          const sub = me.user?.sub || '';
-          setUserSub(sub);
+        // Create client and connect immediately after userSub is available
+        const newClient = new PipecatClient({
+          transport: new WebSocketTransport({
+            wsUrl: `ws://localhost:8000/ws/pipecat?user_sub=${sub}`,
+            serializer: new ProtobufFrameSerializer(),
+            recorderSampleRate: 16000,
+            playerSampleRate: 24000,
+          }),
+          enableMic: true,
+          enableCam: false,
+        }) as any;
 
-          // Create client AFTER userSub is available, but DON'T auto-connect
-          const newClient = new PipecatClient({
-            transport: new WebSocketTransport({
-              wsUrl: `ws://localhost:8000/ws/pipecat?user_sub=${sub}`,
-              serializer: new ProtobufFrameSerializer(),
-              recorderSampleRate: 16000,
-              playerSampleRate: 24000,
-            }),
-            enableMic: true,
-            enableCam: false,
-          }) as any;
-
-          clientRef.current = newClient;
-          setClient(newClient);
+        clientRef.current = newClient;
+        setClient(newClient);
+        
+        // Connect immediately and listen for BotReady event
+        try {
+          await newClient.connect();
+          console.log('Pipecat connected successfully');
+        } catch (connectError) {
+          console.error('Pipecat connection failed:', connectError);
+          setError('Failed to connect to voice assistant');
           setLoading(false);
-        } else {
-          setError('Authentication failed');
-          setLoading(false);
+          return;
         }
-      } catch (e) {
-        console.error('Auth check failed', e);
-        setError('Failed to connect to backend');
+        // Listen for BotReady event to know when Pipecat is fully ready
+        newClient.on(RTVIEvent.BotReady, () => {
+          console.log('Pipecat bot is ready');
+          
+          // Pre-warm audio context before hiding spinner
+          console.log('Pre-warming audio context...');
+          try {
+            const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)();
+            
+            // Resume audio context if suspended
+            if (audioContext.state === 'suspended') {
+              audioContext.resume().then(() => {
+                console.log('AudioContext resumed');
+              }).catch(err => {
+                console.warn('AudioContext resume failed:', err);
+              });
+            }
+            
+            // Create a compressor to prevent sudden volume spikes
+            const compressor = audioContext.createDynamicsCompressor();
+            compressor.threshold.setValueAtTime(-24, audioContext.currentTime);
+            compressor.knee.setValueAtTime(30, audioContext.currentTime);
+            compressor.ratio.setValueAtTime(12, audioContext.currentTime);
+            compressor.attack.setValueAtTime(0.003, audioContext.currentTime);
+            compressor.release.setValueAtTime(0.25, audioContext.currentTime);
+            compressor.connect(audioContext.destination);
+            
+            // Create a gain node for smooth audio fade-in with exponential curve
+            const gainNode = audioContext.createGain();
+            gainNode.gain.setValueAtTime(0, audioContext.currentTime);
+            gainNode.gain.exponentialRampToValueAtTime(0.7, audioContext.currentTime + 0.8); // 800ms exponential fade-in to 70% volume
+            gainNode.connect(compressor);
+            
+            // Create a silent buffer to warm up the audio pipeline with fade-in
+            const silentBuffer = audioContext.createBuffer(1, audioContext.sampleRate, audioContext.sampleRate);
+            const source = audioContext.createBufferSource();
+            source.buffer = silentBuffer;
+            source.connect(gainNode);
+            source.start();
+            source.stop(audioContext.currentTime + 0.8);
+            
+            console.log('Audio context pre-warmed with smooth fade-in and compression');
+          } catch (audioError) {
+            console.warn('Audio context pre-warm failed:', audioError);
+            // Continue anyway - audio should still work
+          }
+          
+          // Add a small delay to ensure audio pipeline is fully ready and fade-in completes
+          setTimeout(() => {
+            console.log('Audio warm-up delay complete, hiding spinner');
+            setLoading(false);
+          }, 1500); // 1.5s delay to account for 800ms fade-in + buffer
+          
+          // Listen for RTVI server messages for sleep state updates
+          newClient.on(RTVIEvent.ServerMessage, (message: any) => {
+            console.log('📥 RTVI server message received:', message);
+            console.log('📥 Message structure:', JSON.stringify(message));
+            
+            // Handle different message structures
+            let sleepState = null;
+            let isSleeping = null;
+            
+            // Check direct properties
+            if (message.sleep_state) {
+              sleepState = message.sleep_state;
+            } else if (message.data && message.data.sleep_state) {
+              sleepState = message.data.sleep_state;
+            }
+            
+            // Also check for sleeping boolean
+            if (message.sleeping !== undefined) {
+              isSleeping = message.sleeping;
+            } else if (message.data && message.data.sleeping !== undefined) {
+              isSleeping = message.data.sleeping;
+            }
+            
+            if (sleepState) {
+              console.log('📥 Sleep state update from RTVI:', sleepState);
+              setSleepStatus(sleepState);
+            } else if (isSleeping !== null) {
+              console.log('📥 Sleeping boolean from RTVI:', isSleeping);
+              setSleepStatus(isSleeping ? 'Sleeping' : 'Awake');
+            } else {
+              console.log('📥 RTVI message without sleep state:', message);
+            }
+          });
+        });
+
+
+        // Fallback: set loading to false after timeout if ready event doesn't fire
+        setTimeout(() => {
+          console.log('BotReady timeout - hiding spinner anyway');
+          setLoading(false);
+        }, 10000); // Increased to 10s to account for audio warm-up + fade-in + 3s delay
+
+      } else {
+        setError('Authentication failed');
         setLoading(false);
       }
-    };
+    } catch (e) {
+      console.error('Auth check failed', e);
+      setError('Failed to connect to backend');
+      setLoading(false);
+    }
+  };
 
-    fetchUser();
+  fetchUser();
 
-    return () => {
-      if (clientRef.current) {
-        try {
-          clientRef.current.disconnect();
-        } catch (e) {
-          console.error('Failed to disconnect client on cleanup', e);
-        }
+  return () => {
+    if (clientRef.current) {
+      try {
+        clientRef.current.disconnect();
+      } catch (e) {
+        console.error('Failed to disconnect client on cleanup', e);
       }
-    };
-  }, []); // Empty dependency array - only run once on mount
-
+    }
+  };
+}, []); // Empty dependency array - only run once on mount
 
   return (
     <main
@@ -76,117 +178,20 @@ export const VoiceAssistant = () => {
         minHeight: '100vh',
         background: '#F7F9FC',
         overflow: 'hidden',
+        paddingBottom: '120px', // Space for bottom nav
       }}
     >
       {/* Animated background with floating blobs and particles */}
-      <AnimatedBackground accentColor={accentColor} />
+      <AnimatedBackground />
 
       {/* Film grain overlay */}
       <div className="film-grain" aria-hidden="true" />
-
-      {/* Enhanced Navigation Header with motion */}
-      <motion.nav
-        initial={{ y: -20, opacity: 0 }}
-        animate={{ y: 0, opacity: 1 }}
-        transition={{ duration: 0.6, ease: "easeOut" as Easing }}
-        style={{
-          position: 'fixed',
-          top: 0,
-          left: 0,
-          right: 0,
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          padding: '16px 32px',
-          background: 'rgba(255, 255, 255, 0.85)',
-          backdropFilter: 'blur(12px)',
-          borderBottom: '1px solid rgba(232, 240, 255, 0.6)',
-          zIndex: 100,
-        }}
-      >
-        <motion.div 
-          style={{display: 'flex', alignItems: 'center', gap: '12px'}}
-          initial={{ x: -20, opacity: 0 }}
-          animate={{ x: 0, opacity: 1 }}
-          transition={{ duration: 0.6, ease: "easeOut" as Easing, delay: 0.2 }}
-        >
-          <motion.button
-            onClick={() => window.location.href = '/profile'}
-            whileHover={{ scale: 1.05, backgroundColor: 'rgba(247, 249, 252, 0.9)' }}
-            whileTap={{ scale: 0.95 }}
-            style={{
-              padding: '10px 20px',
-              background: 'white',
-              border: '1px solid rgba(232, 240, 255, 0.8)',
-              borderRadius: '12px',
-              color: '#14213D',
-              fontSize: '0.875rem',
-              fontWeight: 600,
-              cursor: 'pointer',
-              transition: 'all 0.2s',
-              boxShadow: '0 2px 8px rgba(20, 33, 61, 0.04)',
-            }}
-          >
-            Profile
-          </motion.button>
-          <motion.button
-            onClick={() => window.location.href = '/documents'}
-            whileHover={{ scale: 1.05, backgroundColor: 'rgba(247, 249, 252, 0.9)' }}
-            whileTap={{ scale: 0.95 }}
-            style={{
-              padding: '10px 20px',
-              background: 'white',
-              border: '1px solid rgba(232, 240, 255, 0.8)',
-              borderRadius: '12px',
-              color: '#14213D',
-              fontSize: '0.875rem',
-              fontWeight: 600,
-              cursor: 'pointer',
-              transition: 'all 0.2s',
-              boxShadow: '0 2px 8px rgba(20, 33, 61, 0.04)',
-            }}
-          >
-            Documents
-          </motion.button>
-        </motion.div>
-        <motion.button
-          onClick={async () => {
-            try {
-              await fetch('/auth/logout', {
-                method: 'POST',
-                credentials: 'include'
-              });
-            } finally {
-              window.location.href = '/login';
-            }
-          }}
-          whileHover={{ scale: 1.05, backgroundColor: 'rgba(254, 242, 242, 0.9)' }}
-          whileTap={{ scale: 0.95 }}
-          initial={{ x: 20, opacity: 0 }}
-          animate={{ x: 0, opacity: 1 }}
-          transition={{ duration: 0.6, ease: "easeOut" as Easing, delay: 0.3 }}
-          style={{
-            padding: '10px 20px',
-            background: 'white',
-            border: '1px solid rgba(232, 240, 255, 0.8)',
-            borderRadius: '12px',
-            color: '#DC2626',
-            fontSize: '0.875rem',
-            fontWeight: 600,
-            cursor: 'pointer',
-            transition: 'all 0.2s',
-            boxShadow: '0 2px 8px rgba(20, 33, 61, 0.04)',
-          }}
-        >
-          Logout
-        </motion.button>
-      </motion.nav>
 
       {/* Main Content */}
       <motion.div
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.8, ease: "easeOut" as Easing, delay: 0.4 }}
+        transition={{ duration: 0.8, ease: "easeOut" as Easing }}
         style={{
           position: 'relative',
           zIndex: 1,
@@ -195,7 +200,7 @@ export const VoiceAssistant = () => {
           flexDirection: 'column',
           alignItems: 'center',
           justifyContent: 'center',
-          padding: '80px 32px 32px',
+          padding: '32px',
         }}
       >
         {loading && (
@@ -214,7 +219,7 @@ export const VoiceAssistant = () => {
               animation: 'spin 1s linear infinite',
               margin: '0 auto 16px'
             }}></div>
-            <p style={{color: '#64748B', marginTop: '16px', fontSize: '1rem', fontWeight: 500}}>Connecting to your assistant...</p>
+            <p style={{color: '#64748B', marginTop: '16px', fontSize: '1rem', fontWeight: 500}}>Initializing EMO...</p>
           </motion.div>
         )}
         
@@ -239,9 +244,14 @@ export const VoiceAssistant = () => {
             <p style={{color: '#64748B'}}>{error}</p>
           </motion.div>
         )}
+
         
-        {!loading && !error && client && <VoiceSessionCard userSub={userSub} client={client} onColorChange={handleColorChange} />}
+        
+        {!loading && !error && client && <VoiceSessionCard userSub={userSub} client={client} sleepStatus={sleepStatus} />}
       </motion.div>
+
+      {/* Responsive Navigation */}
+      <ResponsiveNav />
     </main>
   );
 };

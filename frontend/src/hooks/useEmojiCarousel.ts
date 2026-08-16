@@ -98,8 +98,17 @@ export const useEmojiCarousel = ({
       willChange: 'transform, filter, opacity' as const,
     };
 
-    // Use custom scale or compact mode scale
-    const scaleFactor = compact ? 0.5 : scale;
+    // In compact mode, hide all emojis
+    if (compact) {
+      return {
+        ...baseStyle,
+        transform: 'translateX(-50%) scale(0)',
+        opacity: 0,
+      };
+    }
+
+    // Use custom scale
+    const scaleFactor = scale;
 
     switch (role) {
       case 'center':
@@ -120,7 +129,7 @@ export const useEmojiCarousel = ({
           filter: 'blur(2px)',
           opacity: 0.7,
           zIndex: 10,
-          left: isMobile ? '25%' : '30%',
+          left: isMobile ? '20%' : '25%',
           height: isMobile ? `${80 * scaleFactor}px` : `${120 * scaleFactor}px`,
           bottom: isMobile ? '25%' : '18%',
         };
@@ -131,7 +140,7 @@ export const useEmojiCarousel = ({
           filter: 'blur(2px)',
           opacity: 0.7,
           zIndex: 10,
-          left: isMobile ? '75%' : '70%',
+          left: isMobile ? '80%' : '75%',
           height: isMobile ? `${80 * scaleFactor}px` : `${120 * scaleFactor}px`,
           bottom: isMobile ? '25%' : '18%',
         };

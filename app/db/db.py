@@ -75,6 +75,7 @@ def init_db():
         responsibilities TEXT,
         company_name TEXT,
         work_environment TEXT,
+        emo_avatar TEXT,
         google_refresh_token TEXT,
         updated_at TEXT NOT NULL
     )
@@ -95,6 +96,24 @@ def init_db():
     with get_db() as conn:
         conn.execute(ddl)
         conn.execute(knowledge_documents_ddl)
+        
+        # Add emo_avatar column if it doesn't exist (for existing databases)
+        try:
+            if using_postgres():
+                conn.execute("""
+                    ALTER TABLE user_profiles 
+                    ADD COLUMN IF NOT EXISTS emo_avatar TEXT
+                """)
+            else:
+                # SQLite doesn't support IF NOT EXISTS for ALTER TABLE, so we check first
+                try:
+                    conn.execute("ALTER TABLE user_profiles ADD COLUMN emo_avatar TEXT")
+                except Exception:
+                    # Column likely already exists
+                    pass
+        except Exception as e:
+            logger.warning(f"Failed to add emo_avatar column (may already exist): {e}")
+            
     logger.info("init_db complete | using_postgres=%s", using_postgres())
 
 

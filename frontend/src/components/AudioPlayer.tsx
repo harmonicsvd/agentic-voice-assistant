@@ -1,11 +1,8 @@
-import { useRef, useEffect } from 'react';
-
 interface AudioPlayerProps {
-  audioUrl: string | null;
   audioRef: React.RefObject<HTMLAudioElement | null>;
 }
 
-export const AudioPlayer = ({ audioUrl, audioRef }: AudioPlayerProps) => {
+export const AudioPlayer = ({ audioRef }: AudioPlayerProps) => {
   return (
     <div style={{ marginTop: '20px' }}>
       <audio

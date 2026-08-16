@@ -19,3 +19,4 @@ class PlannerState(TypedDict):
     tool_specific_state: Optional[Dict[str, Any]]  # Generic: tool-specific data (dynamic per tool)
     pipeline_status: Optional[str]  # Track current pipeline stage
     pipeline_message: Optional[str]  # User-facing message about pipeline state
+    missing_required_fields: Optional[List[str]]  # Track which required fields are missing for execution

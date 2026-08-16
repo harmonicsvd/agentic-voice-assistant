@@ -16,7 +16,6 @@ export const useStreamingWebSocket = (url: string) => {
   const wsRef = useRef<WebSocket | null>(null);
   const audioPlayerRef = useRef<HTMLAudioElement | null>(null);
   const audioContextRef = useRef<AudioContext | null>(null);
-  const audioQueueRef = useRef<AudioBuffer[]>([]);
 
   const connect = useCallback(() => {
     try {

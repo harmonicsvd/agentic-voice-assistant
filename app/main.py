@@ -84,6 +84,7 @@ class ProfileUpdate(BaseModel):
     responsibilities: str = Field(default="", max_length=500)
     company_name: str = Field(default="", max_length=100)
     work_environment: str = Field(default="", max_length=50)
+    emo_avatar: str = Field(default="", max_length=255)  # Add this line
 
 
 @app.get("/login")
@@ -119,9 +120,9 @@ async def setup_page(request: Request):
     return FileResponse(SETUP_HTML)
 
 
-@app.get("/profile")
+@app.get("/api/profile")
 async def get_profile(request: Request):
-    """Return current user profile from SQLite for authenticated browser user."""
+    """Return current user profile from database (SQLite or PostgreSQL) for authenticated browser user."""
     user, error = get_current_user_or_401(request)
     if error:
         return error
@@ -137,7 +138,7 @@ async def get_profile(request: Request):
         "profile": dict(row),
     }
 
-@app.put("/profile")
+@app.put("/api/profile")
 async def put_profile(payload: ProfileUpdate, request: Request):
     """Upsert current user profile preferences."""
     user, error = get_current_user_or_401(request)
@@ -148,25 +149,22 @@ async def put_profile(payload: ProfileUpdate, request: Request):
 
     try:
         with get_db() as conn:
-            # Get existing refresh token to preserve it
+            # Get existing profile data to preserve fields not being updated
             existing = db_execute(
                 conn,
-                "SELECT google_refresh_token FROM user_profiles WHERE sub = %s",
+                "SELECT * FROM user_profiles WHERE sub = %s",
                 (user["sub"],)
             ).fetchone()
-            existing_refresh_token = existing["google_refresh_token"] if existing else None
             
-            # For SQLite, fetch existing name to preserve it (INSERT OR REPLACE replaces entire row)
-            if not using_postgres():
-                cursor = db_execute(
-                    conn,
-                    "SELECT name FROM user_profiles WHERE sub = ?",
-                    (user["sub"],)
-                )
-                row = cursor.fetchone()
-                existing_name = row["name"] if row and row.get("name") else ""
-            else:
-                existing_name = ""  # PostgreSQL ON CONFLICT will preserve name
+            # Prepare values - use existing if payload field is empty, otherwise use payload
+            work_description = payload.work_description.strip() if payload.work_description else (existing["work_description"] if existing else "")
+            industry = payload.industry.strip() if payload.industry else (existing["industry"] if existing else "")
+            responsibilities = payload.responsibilities.strip() if payload.responsibilities else (existing["responsibilities"] if existing else "")
+            company_name = payload.company_name.strip() if payload.company_name else (existing["company_name"] if existing else "")
+            work_environment = payload.work_environment.strip() if payload.work_environment else (existing["work_environment"] if existing else "")
+            emo_avatar = payload.emo_avatar.strip() if payload.emo_avatar else (existing["emo_avatar"] if existing else "")
+            existing_name = existing["name"] if existing and existing.get("name") else ""
+            existing_refresh_token = existing["google_refresh_token"] if existing else None
 
             # Use different upsert syntax based on database type
             if using_postgres():
@@ -174,30 +172,32 @@ async def put_profile(payload: ProfileUpdate, request: Request):
                     conn,
                     """
                     INSERT INTO user_profiles (
-                        sub, email, name, work_description, industry, responsibilities, company_name, work_environment,
+                        sub, email, name, work_description, industry, responsibilities, company_name, work_environment, emo_avatar,
                         google_refresh_token, updated_at
                     )
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                     ON CONFLICT(sub) DO UPDATE SET
                         email = excluded.email,
                         name = user_profiles.name,
-                        work_description = excluded.work_description,
-                        industry = excluded.industry,
-                        responsibilities = excluded.responsibilities,
-                        company_name = excluded.company_name,
-                        work_environment = excluded.work_environment,
+                        work_description = CASE WHEN excluded.work_description = '' THEN user_profiles.work_description ELSE excluded.work_description END,
+                        industry = CASE WHEN excluded.industry = '' THEN user_profiles.industry ELSE excluded.industry END,
+                        responsibilities = CASE WHEN excluded.responsibilities = '' THEN user_profiles.responsibilities ELSE excluded.responsibilities END,
+                        company_name = CASE WHEN excluded.company_name = '' THEN user_profiles.company_name ELSE excluded.company_name END,
+                        work_environment = CASE WHEN excluded.work_environment = '' THEN user_profiles.work_environment ELSE excluded.work_environment END,
+                        emo_avatar = CASE WHEN excluded.emo_avatar = '' THEN user_profiles.emo_avatar ELSE excluded.emo_avatar END,
                         google_refresh_token = COALESCE(excluded.google_refresh_token, user_profiles.google_refresh_token),
                         updated_at = excluded.updated_at
                     """,
                     (
                         user["sub"],
                         user.get("email", ""),
-                        "",  # name preserved by ON CONFLICT: name = user_profiles.name
-                        payload.work_description.strip(),
-                        payload.industry.strip(),
-                        payload.responsibilities.strip(),
-                        payload.company_name.strip(),
-                        payload.work_environment.strip(),
+                        existing_name,  # preserve existing name from OAuth
+                        work_description,
+                        industry,
+                        responsibilities,
+                        company_name,
+                        work_environment,
+                        emo_avatar,
                         existing_refresh_token,
                         updated_at,
                     ),
@@ -208,20 +208,21 @@ async def put_profile(payload: ProfileUpdate, request: Request):
                     conn,
                     """
                     INSERT OR REPLACE INTO user_profiles (
-                        sub, email, name, work_description, industry, responsibilities, company_name, work_environment,
+                        sub, email, name, work_description, industry, responsibilities, company_name, work_environment, emo_avatar,
                         google_refresh_token, updated_at
                     )
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         user["sub"],
                         user.get("email", ""),
                         existing_name,  # preserve existing name from OAuth
-                        payload.work_description.strip(),
-                        payload.industry.strip(),
-                        payload.responsibilities.strip(),
-                        payload.company_name.strip(),
-                        payload.work_environment.strip(),
+                        work_description,
+                        industry,
+                        responsibilities,
+                        company_name,
+                        work_environment,
+                        emo_avatar,
                         existing_refresh_token,
                         updated_at,
                     ),
@@ -639,7 +640,7 @@ def _get_profile_row(sub: str):
             return db_execute(
                 conn,
                 """
-                SELECT sub, email, name, work_description, industry, responsibilities, company_name, work_environment, google_refresh_token, updated_at
+                SELECT sub, email, name, work_description, industry, responsibilities, company_name, work_environment, emo_avatar, google_refresh_token, updated_at
                 FROM user_profiles
                 WHERE sub = %s
                 """,

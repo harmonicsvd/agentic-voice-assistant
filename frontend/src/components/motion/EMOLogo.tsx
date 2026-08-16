@@ -34,7 +34,7 @@ const TypingAnimation = () => {
 
 // Old components removed - replaced with EmojiCarousel
 
-export const EMOLogo = ({ onColorChange }: { onColorChange?: (color: string) => void } = {}) => {
+export const EMOLogo = ({ onColorChange, compact = false }: { onColorChange?: (color: string) => void, compact?: boolean } = {}) => {
   // Container variants for main logo
   const containerVariants = {
     hidden: { opacity: 0 },
@@ -150,8 +150,8 @@ export const EMOLogo = ({ onColorChange }: { onColorChange?: (color: string) => 
       style={{
         display: 'flex',
         flexDirection: 'column',
-        alignItems: 'center',
-        marginBottom: '32px'
+        alignItems: compact ? 'flex-start' : 'center',
+        marginBottom: compact ? '0' : '32px'
       }}
     >
       {/* EMO Brand Name - Split into individual characters with labels */}
@@ -162,30 +162,30 @@ export const EMOLogo = ({ onColorChange }: { onColorChange?: (color: string) => 
         style={{
           display: 'flex',
           fontFamily: '"Space Grotesk", sans-serif',
-          fontSize: 'clamp(10rem, 18vw, 20rem)',
+          fontSize: compact ? '18vw' : 'clamp(10rem, 18vw, 20rem)',
           fontWeight: 700,
-          letterSpacing: '-0.04em',
+          letterSpacing: compact ? '0.1em' : '-0.04em',
           color: 'var(--text-main)',
           margin: 0,
           textAlign: 'center',
-          position: 'relative'
+          position: 'relative',
         }}
       >
         {/* E with label */}
-        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
+        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center',marginRight: compact ? '20px' : '0' }}>
           <motion.span variants={eVariants}>E</motion.span>
           <motion.span 
             variants={eLabelVariants}
             style={{
-              fontSize: 'clamp(1rem, 1.2vw, 1rem)',
+              fontSize: compact ? '1.2rem' : 'clamp(1rem, 1.2vw, 1rem)',
               color: 'var(--text-soft)',
               marginTop: '-80px',
               textAlign: 'center',
               letterSpacing: '0.05em',
               opacity: 0.7,
               width: 'auto',
-              maxWidth: 'clamp(4rem, 8vw, 10rem)',
-              marginLeft: '-80px'
+              maxWidth: compact ? '60px' : 'clamp(4rem, 8vw, 10rem)',
+              marginLeft: compact ? '-80px' : '-80px'
             }}
           >
             expressive
@@ -198,14 +198,15 @@ export const EMOLogo = ({ onColorChange }: { onColorChange?: (color: string) => 
           <motion.span 
             variants={mLabelVariants}
             style={{
-              fontSize: 'clamp(0.6rem, 1.2vw, 1rem)',
+              fontSize: compact ? '1.2rem' : 'clamp(0.6rem, 1.2vw, 1rem)',
               color: 'var(--text-soft)',
-              marginTop: '-80px',
+              marginTop: compact ? '-38px' : '-80px',
               textAlign: 'center',
               letterSpacing: '0.05em',
               opacity: 0.7,
               width: 'auto',
-              maxWidth: 'clamp(4rem, 8vw, 10rem)',
+              maxWidth: compact ? '60px' : 'clamp(4rem, 8vw, 10rem)',
+              marginLeft: compact ? '-47px' : '18px',
             }}
           >
             multimodal
@@ -213,20 +214,20 @@ export const EMOLogo = ({ onColorChange }: { onColorChange?: (color: string) => 
         </div>
 
         {/* O with label */}
-        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
+<div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', marginLeft: compact ? '-40px' : '0' }}>
           <motion.span variants={oVariants}>O</motion.span>
           <motion.span 
             variants={oLabelVariants}
             style={{
-              fontSize: 'clamp(0.6rem, 1.2vw, 1rem)',
+              fontSize: compact ? '1.2rem' : 'clamp(0.6rem, 1.2vw, 1rem)',
               color: 'var(--text-soft)',
-              marginTop: '-80px',
+              marginTop: compact ? '-38px' : '-80px',
               textAlign: 'center',
               letterSpacing: '0.05em',
               opacity: 0.7,
               width: 'auto',
-              maxWidth: 'clamp(4rem, 8vw, 10rem)',
-              marginLeft: '80px'
+              maxWidth: compact ? '60px' : 'clamp(4rem, 8vw, 10rem)',
+              marginLeft: compact ? '60px' : '95px'
             }}
           >
             operator
@@ -234,11 +235,16 @@ export const EMOLogo = ({ onColorChange }: { onColorChange?: (color: string) => 
         </div>
       </motion.div>
 
-      {/* Emoji Carousel - Interactive 3D carousel */}
-      <EmojiCarousel onColorChange={onColorChange} />
+      {/* Only show emoji carousel and typing animation in non-compact mode */}
+      {!compact && (
+        <>
+          {/* Emoji Carousel - Interactive 3D carousel */}
+          <EmojiCarousel onColorChange={onColorChange} />
 
-      {/* Typing Animation */}
-      <TypingAnimation />
+          {/* Typing Animation */}
+          <TypingAnimation />
+        </>
+      )}
     </div>
   );
 };

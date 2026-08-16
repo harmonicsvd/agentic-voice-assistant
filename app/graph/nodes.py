@@ -999,18 +999,36 @@ async def create_plan(state: PlannerState, planning_llm) -> PlannerState:
         # Use config-based required fields
         required_fields = get_required_fields("create_event_tool")
         
+        # Track missing required fields
+        missing_fields = []
+        
         if len(meetings) == 1:
             meeting_params = meetings[0]
             has_all_required_fields = all(meeting_params.get(field) for field in required_fields)
+            if not has_all_required_fields:
+                missing_fields = [field for field in required_fields if not meeting_params.get(field)]
         elif len(meetings) > 1:
             has_all_required_fields = all(
                 all(meeting.get(field) for field in required_fields)
                 for meeting in meetings
             )
+            if not has_all_required_fields:
+                # Collect missing fields from all meetings
+                for meeting in meetings:
+                    for field in required_fields:
+                        if not meeting.get(field) and field not in missing_fields:
+                            missing_fields.append(field)
         elif all(params.get(field) for field in required_fields):
             has_all_required_fields = True
+        else:
+            has_all_required_fields = False
+            missing_fields = [field for field in required_fields if not params.get(field)]
         
         logger.info(f"🔍 create_plan: has_all_required_fields={has_all_required_fields}")
+        logger.info(f"🔍 create_plan: missing_required_fields={missing_fields}")
+        
+        # Store missing fields in state for LLM feedback
+        state["missing_required_fields"] = missing_fields if missing_fields else None
         
         # TIERED CONFIRMATION LOGIC:
         # Tier 1: Natural confirmation + all required fields → Execute

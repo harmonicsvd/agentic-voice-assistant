@@ -9,9 +9,25 @@ that defines:
 - Confirmation requirements
 - Prompt file references
 - State reset behavior
+- Read-only vs write-enabled classification
 
 This makes the system extensible - adding new tools only requires adding
 a configuration entry, not modifying core logic.
+
+HOW TO ADD NEW TOOLS:
+1. Add a configuration entry in TOOL_CONFIGS with:
+   - required_fields: list of required parameter names
+   - optional_fields: list of optional parameter names  
+   - is_read_only: True for read-only tools (get data), False for write-enabled tools (create/update/delete)
+   - state_key: key for storing tool-specific state
+   - requires_confirmation: whether user confirmation is needed
+   - context_formatter: function name for formatting context to LLM
+2. The system will automatically handle:
+   - Tool execution result confirmation messages
+   - Read-only vs write-enabled behavior
+   - Missing field detection and prompting
+   - Dynamic context formatting
+3. No hardcoded logic needed in pipecat_agent.py or other core files
 """
 
 # Global configuration (tool-independent)
@@ -53,8 +69,8 @@ def get_default_timezone() -> str:
 
 TOOL_CONFIGS = {
     "create_event_tool": {
-        "required_fields": ["date", "time", "meeting_mode", "name"],
-        "optional_fields": ["description", "duration", "location", "city"],
+        "required_fields": ["date", "time", "meeting_mode", "description", "name"],
+        "optional_fields": ["duration", "location", "city", "title"],
         "state_key": "meetings",  # Dynamic: meetings array for create_event_tool
         "requires_confirmation": True,
         "state_reset_on_cancel": True,
@@ -219,6 +235,11 @@ def is_read_only_tool(tool_name: str) -> bool:
     return config.get("is_read_only", False)
 
 
+def is_write_enabled_tool(tool_name: str) -> bool:
+    """Check if a tool is write-enabled (has side effects like creating, updating, deleting)."""
+    return not is_read_only_tool(tool_name)
+
+
 def get_extraction_prompt_file(tool_name: str) -> str:
     """Get the extraction prompt file for a tool."""
     config = get_tool_config(tool_name)
@@ -314,23 +335,56 @@ def format_meeting_context(params: dict) -> str:
     if meetings and isinstance(meetings, list) and len(meetings) > 0:
         meeting = meetings[0]
         context_parts = []
+        missing_parts = []
         
-        # Format key meeting details
+        # Required fields first
         if meeting.get("date"):
             context_parts.append(f"Date: {meeting['date']}")
+        else:
+            missing_parts.append("date")
+            
         if meeting.get("time"):
             context_parts.append(f"Time: {meeting['time']}")
-        if meeting.get("duration"):
-            context_parts.append(f"Duration: {meeting['duration']}")
+        else:
+            missing_parts.append("time")
+            
         if meeting.get("meeting_mode"):
             context_parts.append(f"Mode: {meeting['meeting_mode']}")
+        else:
+            missing_parts.append("meeting mode")
+            
         if meeting.get("description"):
             context_parts.append(f"Description: {meeting['description']}")
+        else:
+            missing_parts.append("description")
+            
         if meeting.get("name"):
             context_parts.append(f"With: {meeting['name']}")
+        else:
+            missing_parts.append("who the meeting is with")
+        
+        # Optional fields
+        if meeting.get("duration"):
+            context_parts.append(f"Duration: {meeting['duration']}")
         
         if context_parts:
-            return f"Meeting details collected so far: {', '.join(context_parts)}. If user is providing more details, acknowledge them. If details are complete, ask for confirmation."
+            context_str = f"Meeting details collected so far: {', '.join(context_parts)}."
+            
+            # Explicitly mention what's missing
+            if missing_parts:
+                context_str += f" Still missing: {', '.join(missing_parts)}."
+                # Specifically prompt for name if it's missing
+                if "who the meeting is with" in missing_parts:
+                    context_str += " CRITICAL: Ask 'Who is the meeting with?' to get the required name field."
+                else:
+                    # Ask for the first missing field
+                    context_str += f" Ask for the missing information: {missing_parts[0]}."
+            
+            context_str += " If user is providing more details, acknowledge them. If details are complete, ask for confirmation."
+            return context_str
+        else:
+            # No details collected yet - start fresh
+            return "Starting new meeting booking. Ask for the first required piece of information (date, time, meeting mode, description, or who the meeting is with)."
     
     return ""
 

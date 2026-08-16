@@ -96,9 +96,10 @@ export const EmojiCarousel = ({ onColorChange, compact = false }: EmojiCarouselP
       style={{
         position: 'relative',
         width: '100%',
-        height: isMobile ? '200px' : '280px',
+        height: compact ? '0' : (isMobile ? '200px' : '280px'),
         overflow: 'visible',
-        marginTop: '20px',
+        marginTop: compact ? '0' : '20px',
+        visibility: compact ? 'hidden' : 'visible',
       }}
     >
       {/* Carousel */}

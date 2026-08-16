@@ -110,6 +110,7 @@ CRITICAL RULES FOR SPEECH FRAGMENTS:
 - CRITICAL: Do NOT copy the field descriptions from this prompt - extract actual values from user input
 - CRITICAL: If the existing parameters already have a correct value (e.g., time="17:00"), DO NOT change it based on this fragment unless the user is clearly providing a NEW value
 - CRITICAL: This is a SPEECH FRAGMENT - if the input is incomplete (e.g., "The purpose is, we would..."), extract what you can but be conservative
+- CRITICAL: ALWAYS use DOUBLE QUOTES (" ") for JSON keys and string values. NEVER use single quotes (' '). This will cause JSON parsing errors.
 - Return ONLY raw JSON, no markdown, no explanations
 
 Return this JSON format (ONLY include fields that the user mentions, NO empty strings):

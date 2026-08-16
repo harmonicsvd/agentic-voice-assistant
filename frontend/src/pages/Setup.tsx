@@ -45,7 +45,7 @@ export const Setup = () => {
 
   const loadProfile = async () => {
     try {
-      const response = await fetch('/profile', { credentials: 'same-origin' });
+      const response = await fetch('/api/profile', { credentials: 'same-origin' });
       if (!response.ok) return;
       const payload = await response.json();
       const profile = payload.profile || {};
@@ -114,7 +114,7 @@ export const Setup = () => {
     setError('');
 
     try {
-      const response = await fetch('/profile', {
+      const response = await fetch('/api/profile', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'same-origin',
@@ -194,13 +194,14 @@ export const Setup = () => {
         <div
           style={{
             width: '100%',
-            maxWidth: '480px',
+            maxWidth: '600px',
             display: 'flex',
             flexDirection: 'column',
             alignItems: 'center',
             justifyContent: 'center',
             textAlign: 'center',
-            marginTop: '-60px'
+            marginRight: '32px',
+            flexShrink: 0,
           }}
         >
           <EmojiCarousel onColorChange={setAccentColor} />

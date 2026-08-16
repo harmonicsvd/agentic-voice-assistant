@@ -24,20 +24,16 @@ class LangGraphPlanner:
         self.tool_cache = {}  # Cache for recent tool executions: {(tool_name, params_hash): (result, timestamp)}
         self.cache_ttl = 30  # Cache time-to-live in seconds
         
-        # Use OmniRoute for multi-provider routing with free tier optimization
-        # When REQUIRE_API_KEY=false in OmniRoute config, no API key needed
-        # Otherwise use "free" placeholder for no-auth providers
-        omniroute_api_key = os.getenv("OMNIROUTE_API_KEY", "free")  # Can be empty string if REQUIRE_API_KEY=false
-        omniroute_base_url = os.getenv("OMNIROUTE_BASE_URL", "http://localhost:20128/v1")
+        # Use Groq API directly for planning
+        groq_api_key = os.getenv("GROQ_API_KEY", "")
         
-        # If API key is empty, use a placeholder for OpenAI client compatibility
-        if not omniroute_api_key:
-            omniroute_api_key = "free"
+        if not groq_api_key:
+            raise ValueError("GROQ_API_KEY environment variable is required but not set. Please get your API key from https://console.groq.com/keys and add it to your .env file.")
         
         self.planning_llm = ChatOpenAI(
-            api_key=omniroute_api_key,
-            base_url=omniroute_base_url,
-            model="groq/llama-3.3-70b-versatile",  # Use Groq's strongest Llama 3.3 70B model
+            api_key=groq_api_key,
+            base_url="https://api.groq.com/openai/v1",
+            model="llama-3.3-70b-versatile",  # Use Groq's Llama 3.3 70B model
             temperature=0.1,
         )
         self.skill_prompts = get_skill_prompts()
@@ -159,7 +155,8 @@ class LangGraphPlanner:
             "detected_tools": [],
             "tool_specific_state": accumulated_params.get("tool_specific_state") if accumulated_params and "tool_specific_state" in accumulated_params else {},
             "pipeline_status": "started",
-            "pipeline_message": "Pipeline started"
+            "pipeline_message": "Pipeline started",
+            "missing_required_fields": None
         }
         
         final_state = await self.compiled_graph.ainvoke(initial_state)
@@ -175,6 +172,8 @@ class LangGraphPlanner:
             "collected_params": final_state["collected_params"],
             "plan": final_state["plan"],
             "pipeline_status": pipeline_status,
+            "active_tools": final_state.get("detected_tools", []),
             "pipeline_message": final_state.get("pipeline_message", ""),
-            "detected_tools": final_state.get("detected_tools", [])
+            "detected_tools": final_state.get("detected_tools", []),
+            "missing_required_fields": final_state.get("missing_required_fields")
         }
