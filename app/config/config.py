@@ -21,11 +21,11 @@ class Settings:
     app_secret_key: str = os.getenv("APP_SECRET_KEY", "dev-secret")
     # Internal backend-to-backend auth key (Sham <-> Ram).
     internal_api_key: str = os.getenv("INTERNAL_API_KEY", "")
-    # Sham (`weather-agent`) connection used by Ram summary and upload endpoints.
-    weather_agent_base_url: str = os.getenv("WEATHER_AGENT_BASE_URL", "").rstrip("/")
-    weather_agent_internal_api_key: str = os.getenv("WEATHER_AGENT_INTERNAL_API_KEY", "")
-    weather_agent_timeout_seconds: float = float(os.getenv("WEATHER_AGENT_TIMEOUT_SECONDS", "20"))
-    weather_agent_knowledge_upload_url: str = os.getenv("WEATHER_AGENT_KNOWLEDGE_UPLOAD_URL","")
+    # Backend Agent connection used by Ram summary and upload endpoints.
+    backend_agent_base_url: str = os.getenv("BACKEND_AGENT_BASE_URL", "").rstrip("/")
+    backend_agent_internal_api_key: str = os.getenv("BACKEND_AGENT_INTERNAL_API_KEY", "")
+    backend_agent_timeout_seconds: float = float(os.getenv("BACKEND_AGENT_TIMEOUT_SECONDS", "20"))
+    backend_agent_knowledge_upload_url: str = os.getenv("BACKEND_AGENT_KNOWLEDGE_UPLOAD_URL","")
     vapi_public_key: str = os.getenv("VAPI_PUBLIC_KEY", "")
     app_db_path: str = os.getenv("APP_DB_PATH", "data/app.db")
     react_dev_url: str = os.getenv("REACT_DEV_URL", "http://localhost:5173")

@@ -24,17 +24,17 @@ from app.skills import clear_user_cache
 import httpx
 import os
 
-WEATHER_AGENT_URL = os.getenv("WEATHER_AGENT_URL", "http://127.0.0.1:9000")
-WEATHER_INTERNAL_API_KEY = os.getenv("WEATHER_INTERNAL_API_KEY", "your-internal-api-key")
+BACKEND_AGENT_URL = os.getenv("BACKEND_AGENT_URL", "http://127.0.0.1:9000")
+BACKEND_INTERNAL_API_KEY = os.getenv("BACKEND_INTERNAL_API_KEY", "your-internal-api-key")
 
 async def clear_backend_cache(user_sub: str):
     """Clear the skills cache in the backend service."""
     try:
         async with httpx.AsyncClient() as client:
             response = await client.post(
-                f"{WEATHER_AGENT_URL}/internal/skills/cache/clear",
+                f"{BACKEND_AGENT_URL}/internal/skills/cache/clear",
                 data={"user_sub": user_sub},
-                headers={"X-Internal-API-Key": WEATHER_INTERNAL_API_KEY},
+                headers={"X-Internal-API-Key": BACKEND_INTERNAL_API_KEY},
                 timeout=5.0
             )
             if response.status_code == 200:
@@ -778,27 +778,27 @@ async def upload_knowledge_pdf(
             status_code=400,
         )
 
-    if not settings.weather_agent_knowledge_upload_url:
+    if not settings.backend_agent_knowledge_upload_url:
         return JSONResponse(
-            {"error": "Weather-agent knowledge upload URL is not configured"},
+            {"error": "Backend Agent knowledge upload URL is not configured"},
             status_code=500,
         )
 
     async with httpx.AsyncClient(
-        timeout=settings.weather_agent_timeout_seconds
+        timeout=settings.backend_agent_timeout_seconds
     ) as client:
         response = await client.post(
-            settings.weather_agent_knowledge_upload_url,
+            settings.backend_agent_knowledge_upload_url,
             data={"user_sub": user["sub"]},
             files={
                 "file": (
-                    file.filename or "upload.pdf",
-                    file_bytes,
-                    "application/pdf",
+                    file.filename,
+                    file.file,
+                    file.content_type
                 )
             },
             headers={
-                "X-Internal-API-Key": settings.weather_agent_internal_api_key,
+                "X-Internal-API-Key": settings.backend_agent_internal_api_key,
             },
         )
 

@@ -8,8 +8,8 @@ from langchain.tools import tool
 import httpx
 import os
 
-WEATHER_AGENT_URL = os.getenv("WEATHER_AGENT_URL", "http://127.0.0.1:9000")
-INTERNAL_API_KEY = os.getenv("WEATHER_INTERNAL_API_KEY", "")
+BACKEND_AGENT_URL = os.getenv("BACKEND_AGENT_URL", "http://127.0.0.1:9000")
+INTERNAL_API_KEY = os.getenv("BACKEND_INTERNAL_API_KEY", "")
 
 class ProxySkillInput(BaseModel):
     """Input schema for proxy skill."""
@@ -23,8 +23,8 @@ async def proxy_skill(
     parameters: dict,
     user_sub: str = ""
 ) -> str:
-    """Execute a skill on the weather agent. All skill execution is delegated to the weather agent."""
-    url = f"{WEATHER_AGENT_URL}/internal/skills/{skill_name}"
+    """Execute a skill on the backend agent. All skill execution is delegated to the backend agent."""
+    url = f"{BACKEND_AGENT_URL}/internal/skills/{skill_name}"
     headers = {
         "X-Internal-API-Key": INTERNAL_API_KEY,
     }
