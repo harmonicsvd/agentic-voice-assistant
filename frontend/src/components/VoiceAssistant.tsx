@@ -25,16 +25,19 @@ export const VoiceAssistant = () => {
   // Get user sub from auth - only run once on mount
   const fetchUser = async () => {
     try {
-      const res = await fetch('/auth/me', { credentials: 'include' });
+      const voiceAgentUrl = import.meta.env.VITE_VOICE_AGENT_URL || '';
+      const res = await fetch(`${voiceAgentUrl}/auth/me`, { credentials: 'include' });
       if (res.status === 200) {
         const me = await res.json();
         const sub = me.user?.sub || '';
         setUserSub(sub);
 
         // Create client and connect immediately after userSub is available
+        const wsUrl = voiceAgentUrl.replace('http://', 'ws://').replace('https://', 'wss://');
+        
         const newClient = new PipecatClient({
           transport: new WebSocketTransport({
-            wsUrl: `ws://localhost:8000/ws/pipecat?user_sub=${sub}`,
+            wsUrl: `${wsUrl}/ws/pipecat?user_sub=${sub}`,
             serializer: new ProtobufFrameSerializer(),
             recorderSampleRate: 16000,
             playerSampleRate: 24000,
