@@ -33,7 +33,8 @@ export const Setup = () => {
 
   const checkAuth = async () => {
     try {
-      const res = await fetch('/auth/me', { credentials: 'include' });
+      const voiceAgentUrl = import.meta.env.VITE_VOICE_AGENT_URL || '';
+      const res = await fetch(`${voiceAgentUrl}/auth/me`, { credentials: 'include' });
       if (res.status !== 200) {
         navigate('/login');
       }
@@ -45,7 +46,8 @@ export const Setup = () => {
 
   const loadProfile = async () => {
     try {
-      const response = await fetch('/api/profile', { credentials: 'same-origin' });
+      const voiceAgentUrl = import.meta.env.VITE_VOICE_AGENT_URL || '';
+      const response = await fetch(`${voiceAgentUrl}/api/profile`, { credentials: 'same-origin' });
       if (!response.ok) return;
       const payload = await response.json();
       const profile = payload.profile || {};
@@ -114,7 +116,8 @@ export const Setup = () => {
     setError('');
 
     try {
-      const response = await fetch('/api/profile', {
+      const voiceAgentUrl = import.meta.env.VITE_VOICE_AGENT_URL || '';
+      const response = await fetch(`${voiceAgentUrl}/api/profile`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'same-origin',
