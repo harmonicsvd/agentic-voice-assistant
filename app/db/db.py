@@ -33,7 +33,9 @@ def get_db():
 
     if using_postgres():
         try:
-            conn = psycopg.connect(DATABASE_URL, row_factory=dict_row)
+            logger.info(f"Attempting PostgreSQL connection to: {DATABASE_URL[:20]}...")
+            conn = psycopg.connect(DATABASE_URL, row_factory=dict_row, connect_timeout=10)
+            logger.info("PostgreSQL connection established successfully")
         except Exception as exc:
             _POSTGRES_DISABLED = True
             logger.warning(
@@ -93,9 +95,37 @@ def init_db():
         uploaded_at TEXT NOT NULL
     )
     """
+    skills_ddl = """
+    CREATE TABLE IF NOT EXISTS user_installed_skills (
+        id TEXT PRIMARY KEY,
+        user_sub TEXT NOT NULL,
+        skill_name TEXT NOT NULL,
+        status TEXT NOT NULL DEFAULT 'active',
+        installed_at TEXT NOT NULL,
+        UNIQUE(user_sub, skill_name)
+    )
+    """
+    skill_registry_ddl = """
+    CREATE TABLE IF NOT EXISTS skill_registry (
+        skill_name TEXT PRIMARY KEY,
+        display_name TEXT NOT NULL,
+        description TEXT NOT NULL,
+        required_fields TEXT,  -- JSON array of required field names
+        optional_fields TEXT,  -- JSON array of optional field names
+        state_key TEXT,
+        extraction_prompt_file TEXT,
+        confirmation_prompt_file TEXT,
+        detection_keywords TEXT,  -- JSON array of keywords for detection
+        is_active BOOLEAN DEFAULT TRUE,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+    )
+    """
     with get_db() as conn:
         conn.execute(ddl)
         conn.execute(knowledge_documents_ddl)
+        conn.execute(skills_ddl)
+        conn.execute(skill_registry_ddl)
         
         # Add emo_avatar column if it doesn't exist (for existing databases)
         try:

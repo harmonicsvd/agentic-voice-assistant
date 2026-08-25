@@ -1,4 +1,4 @@
-"""Ram backend: auth, voice calendar tools, and delegation to Sham intelligence."""
+"""Ram backend: auth, voice calendar skills, and delegation to Sham intelligence."""
 
 import hmac
 import json
@@ -20,6 +20,29 @@ from typing import Literal, Any
 
 from app.db.db import init_db, get_db, db_execute, using_postgres
 from uuid import uuid4
+from app.skills import clear_user_cache
+import httpx
+import os
+
+WEATHER_AGENT_URL = os.getenv("WEATHER_AGENT_URL", "http://127.0.0.1:9000")
+WEATHER_INTERNAL_API_KEY = os.getenv("WEATHER_INTERNAL_API_KEY", "your-internal-api-key")
+
+async def clear_backend_cache(user_sub: str):
+    """Clear the skills cache in the backend service."""
+    try:
+        async with httpx.AsyncClient() as client:
+            response = await client.post(
+                f"{WEATHER_AGENT_URL}/internal/skills/cache/clear",
+                data={"user_sub": user_sub},
+                headers={"X-Internal-API-Key": WEATHER_INTERNAL_API_KEY},
+                timeout=5.0
+            )
+            if response.status_code == 200:
+                logger.info(f"Successfully cleared backend cache for user {user_sub}")
+            else:
+                logger.warning(f"Failed to clear backend cache: {response.status_code}")
+    except Exception as e:
+        logger.error(f"Error clearing backend cache: {e}")
 
 from datetime import datetime, timedelta, timezone
 import httpx
@@ -227,6 +250,39 @@ async def put_profile(payload: ProfileUpdate, request: Request):
                         updated_at,
                     ),
                 )
+            
+            # Check if user has any installed skills - if not, install default skill
+            existing_skills = db_execute(
+                conn,
+                "SELECT skill_name FROM user_installed_skills WHERE user_sub = %s AND status = 'active'",
+                (user["sub"],)
+            ).fetchall()
+            
+            if not existing_skills:
+                # User has no skills - install default google_calendar
+                if using_postgres():
+                    db_execute(
+                        conn,
+                        """
+                        INSERT INTO user_installed_skills (id, user_sub, skill_name, status, installed_at)
+                        VALUES (%s, %s, %s, 'active', %s)
+                        ON CONFLICT (user_sub, skill_name) DO NOTHING
+                        """,
+                        (str(uuid4()), user["sub"], "google_calendar", datetime.now(timezone.utc).isoformat())
+                    )
+                else:
+                    db_execute(
+                        conn,
+                        """
+                        INSERT OR IGNORE INTO user_installed_skills (id, user_sub, skill_name, status, installed_at)
+                        VALUES (?, ?, ?, ?, ?)
+                        """,
+                        (str(uuid4()), user["sub"], "google_calendar", "active", datetime.now(timezone.utc).isoformat())
+                    )
+                
+                # Clear cache so the voice agent picks up the new skill
+                clear_user_cache(user["sub"])
+                logger.info(f"Installed default skill 'google_calendar' for new user {user['sub']}")
     except Exception as e:
         logger.error(f"Failed to save profile: {e}")
         return JSONResponse({"error": str(e)}, status_code=500)
@@ -324,6 +380,149 @@ def health():
 def health_head():
     """HEAD variant for liveness checks."""
     return Response(status_code=200)
+
+
+# Skill Management Endpoints
+class SkillInstallRequest(BaseModel):
+    skill_name: str = Field(..., description="Name of the skill to install")
+
+# Predefined list of valid skills for UI database management (using skill names)
+VALID_SKILLS = ["meeting_discussion", "google_calendar"]
+
+@app.post("/api/skills/install")
+async def install_skill(request: Request, payload: SkillInstallRequest):
+    """Install a skill for the current user."""
+    user, error = get_current_user_or_401(request)
+    if error:
+        return error
+
+    try:
+        from uuid import uuid4
+        from datetime import datetime
+
+        # Check if skill is in the predefined valid skills list
+        if payload.skill_name not in VALID_SKILLS:
+            return JSONResponse({"error": f"Skill '{payload.skill_name}' not found"}, status_code=404)
+
+        with get_db() as conn:
+            # Check if already installed
+            existing = db_execute(
+                conn,
+                "SELECT * FROM user_installed_skills WHERE user_sub = %s AND skill_name = %s",
+                (user["sub"], payload.skill_name)
+            ).fetchone()
+
+            if existing:
+                # Update status to active if it exists but is inactive
+                if existing["status"] != "active":
+                    db_execute(
+                        conn,
+                        "UPDATE user_installed_skills SET status = 'active', installed_at = %s WHERE user_sub = %s AND skill_name = %s",
+                        (datetime.now(timezone.utc).isoformat(), user["sub"], payload.skill_name)
+                    )
+            else:
+                # Install the skill - use upsert to handle re-installation after uninstall
+                from app.db.db import using_postgres
+                if using_postgres():
+                    db_execute(
+                        conn,
+                        """
+                        INSERT INTO user_installed_skills (id, user_sub, skill_name, status, installed_at)
+                        VALUES (%s, %s, %s, 'active', %s)
+                        ON CONFLICT (user_sub, skill_name) 
+                        DO UPDATE SET status = 'active', installed_at = %s
+                        """,
+                        (str(uuid4()), user["sub"], payload.skill_name, datetime.now(timezone.utc).isoformat(), datetime.now(timezone.utc).isoformat())
+                    )
+                else:
+                    # SQLite: Use REPLACE (delete + insert) to handle re-installation
+                    db_execute(
+                        conn,
+                        """
+                        INSERT OR REPLACE INTO user_installed_skills (id, user_sub, skill_name, status, installed_at)
+                        VALUES (%s, %s, %s, 'active', %s)
+                        """,
+                        (str(uuid4()), user["sub"], payload.skill_name, datetime.now(timezone.utc).isoformat())
+                    )
+
+        # Clear the skills cache for this user so they get fresh data on next request
+        # This must happen outside the database transaction and after any DB changes
+        clear_user_cache(user["sub"])
+        
+        # Also clear the backend cache
+        await clear_backend_cache(user["sub"])
+
+        return {"ok": True, "skill_name": payload.skill_name}
+    except Exception as e:
+        logger.error(f"Failed to install skill: {e}")
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
+@app.delete("/api/skills/uninstall")
+async def uninstall_skill(request: Request, skill_name: str = Query(..., description="Name of the skill to uninstall")):
+    """Uninstall a skill for the current user."""
+    user, error = get_current_user_or_401(request)
+    if error:
+        return error
+
+    try:
+        # Check if skill is in the predefined valid skills list
+        if skill_name not in VALID_SKILLS:
+            return JSONResponse({"error": f"Skill '{skill_name}' not found"}, status_code=404)
+
+        with get_db() as conn:
+            # Instead of deleting, set status to inactive
+            db_execute(
+                conn,
+                "UPDATE user_installed_skills SET status = 'inactive' WHERE user_sub = %s AND skill_name = %s",
+                (user["sub"], skill_name)
+            )
+
+        # Clear the skills cache for this user so they get fresh data on next request
+        clear_user_cache(user["sub"])
+        
+        # Also clear the backend cache
+        await clear_backend_cache(user["sub"])
+
+        return {"ok": True, "skill_name": skill_name}
+    except Exception as e:
+        logger.error(f"Failed to uninstall skill: {e}")
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
+@app.get("/api/skills/available")
+async def get_available_skills(request: Request):
+    """Get all available skills with installation status for current user."""
+    user, error = get_current_user_or_401(request)
+    if error:
+        return error
+
+    try:
+        # Get all available skills from predefined list
+        available_skills = []
+
+        # Get user's installed skills
+        with get_db() as conn:
+            installed_skills = db_execute(
+                conn,
+                "SELECT skill_name FROM user_installed_skills WHERE user_sub = %s AND status = 'active'",
+                (user["sub"],)
+            ).fetchall()
+
+        installed_skill_names = {row["skill_name"] for row in installed_skills}
+
+        # Build response with installation status from predefined skills list
+        for skill_name in VALID_SKILLS:
+            available_skills.append({
+                "skill_name": skill_name,
+                "installed": skill_name in installed_skill_names,
+                "tools_count": 1  # Placeholder count
+            })
+
+        return {"available_skills": available_skills}
+    except Exception as e:
+        logger.error(f"Failed to get available skills: {e}")
+        return JSONResponse({"error": str(e)}, status_code=500)
 
 
 

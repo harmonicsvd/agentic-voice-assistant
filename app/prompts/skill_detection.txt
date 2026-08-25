@@ -29,10 +29,10 @@ YOUR RESPONSIBILITY:
 - IMPORTANT: When in doubt, return "none" - let the main LLM handle conversation naturally
 
 CONVERSATION STATE AWARENESS:
-- If user is providing details (time, mode, title, description) when a meeting exists → create_event_tool (update)
-- If user is correcting/changing information → create_event_tool (update)
+- If user is providing details (time, mode, title, description) when a meeting exists → google_calendar (update)
+- If user is correcting/changing information → google_calendar (update)
 - If user is confirming or agreeing → "none" (let main LLM handle natural conversation)
-- If user is asking about their schedule → meetings_summary_tool
+- If user is asking about their schedule → meeting_discussion
 - If user wants to cancel/stop/forget/never mind → cancel_event (RESET state)
 - If user wants to start fresh/begin again → cancel_event (RESET state)
 - If user is making casual conversation → "none"
@@ -40,10 +40,10 @@ CONVERSATION STATE AWARENESS:
 - If user is saying "take a break", "are you there?", "thanks", etc. → "none"
 
 BEHAVIOR RULES:
-- Default to "create_event_tool" when user provides meeting-related information
+- Default to "google_calendar" when user provides meeting-related information
 - Use "cancel_event" when user wants to abandon the current task
-- Use "meetings_summary_tool" only when user explicitly asks about their schedule/meetings
-- Use "get_weather_tool" only when user explicitly asks about weather
+- Use "meeting_discussion" only when user explicitly asks about their schedule/meetings
+- Use "get_weather" only when user explicitly asks about weather
 - Use "general_conversation" for general questions, advice, hobbies, tips, knowledge queries unrelated to meetings/weather
 - Return "none" for casual conversation, greetings, confirmations, small talk
 
@@ -60,17 +60,17 @@ BEHAVIOR RULES:
 - If user suddenly changes topic mid-conversation, it might indicate cancellation or new direction
 
 ## WHAT YOU NEED TO OUTPUT:
-- Single tool name: "create_event_tool", "meetings_summary_tool", "get_weather_tool", "cancel_event", "general_conversation", or "none"
+- Single tool name: "google_calendar", "meeting_discussion", "get_weather", "cancel_event", "general_conversation", or "none"
 - NO explanations, NO extra text, just the tool name
 
 Available tools:
-- create_event_tool: User wants to book, schedule, create, or set up a meeting/appointment/event
-- meetings_summary_tool: User wants to view, check, see, list, or show their meetings, schedule, or calendar
-- get_weather_tool: User asks about weather conditions
+- google_calendar: User wants to book, schedule, create, or set up a meeting/appointment/event
+- meeting_discussion: User wants to view, check, see, list, or show their meetings, schedule, or calendar
+- get_weather: User asks about weather conditions
 - cancel_event: User wants to cancel, stop, start fresh, or forget about the current meeting booking
 - general_conversation: User asks general questions, seeks advice, or discusses topics unrelated to meetings/weather (e.g., "how can I sing better?", "what's the meaning of life?", "tell me a joke")
 
-IMPORTANT: If there's an existing meeting in progress, ANY update (time, mode, name, description, confirmation) should use create_event_tool.
+IMPORTANT: If there's an existing meeting in progress, ANY update (time, mode, name, description, confirmation) should use google_calendar.
 
 INTELLIGENT CANCELLATION DETECTION: Use your full context awareness to determine cancellation:
 - Return "cancel_event" ONLY when user explicitly wants to abandon the current task
@@ -91,16 +91,16 @@ CONVERSATION HISTORY (Last 5 messages):
 
 Return ONLY the tool name as a single word. No explanations, no extra text.
 Examples:
-- "I want to book a meeting" → create_event_tool
-- "Show my meetings" → meetings_summary_tool  
-- "What's the weather" → get_weather_tool
-- "Yes book it" → create_event_tool
-- "It's online" (with existing meeting) → create_event_tool
-- "Yes, please" (confirmation) → create_event_tool
-- "That's right" (confirmation) → create_event_tool
-- "I meant..." (conversational filler) → create_event_tool (context-dependent)
-- "Actually..." (conversational filler) → create_event_tool (context-dependent)
-- "No for today" (clarification) → create_event_tool (asking for different date)
+- "I want to book a meeting" → google_calendar
+- "Show my meetings" → meeting_discussion  
+- "What's the weather" → get_weather
+- "Yes book it" → google_calendar
+- "It's online" (with existing meeting) → google_calendar
+- "Yes, please" (confirmation) → google_calendar
+- "That's right" (confirmation) → google_calendar
+- "I meant..." (conversational filler) → google_calendar (context-dependent)
+- "Actually..." (conversational filler) → google_calendar (context-dependent)
+- "No for today" (clarification) → google_calendar (asking for different date)
 - "Cancel the meeting" → cancel_event
 - "Stop, never mind" → cancel_event
 - "Let's start fresh" → cancel_event
@@ -111,4 +111,4 @@ Examples:
 - "Tell me a joke" → general_conversation
 - "Give me advice on cooking" → general_conversation
 
-Return: create_event_tool, meetings_summary_tool, get_weather_tool, cancel_event, general_conversation, or none
+Return: google_calendar, meeting_discussion, get_weather, cancel_event, general_conversation, or none

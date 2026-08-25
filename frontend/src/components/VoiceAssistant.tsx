@@ -5,6 +5,9 @@ import { WebSocketTransport, ProtobufFrameSerializer } from '@pipecat-ai/websock
 import { VoiceSessionCard } from './VoiceSessionCard';
 import { AnimatedBackground } from './motion/AnimatedBackground';
 import { ResponsiveNav } from './ResponsiveNav';
+import { SideNav } from './SideNav';
+import { TourGuide, hasTourCompleted, resetTour } from './TourGuide';
+import { Info } from 'lucide-react';
 
 
 export const VoiceAssistant = () => {
@@ -14,6 +17,9 @@ export const VoiceAssistant = () => {
   const [error, setError] = useState<string | null>(null);
   const [sleepStatus, setSleepStatus] = useState<string | undefined>(undefined); // Don't set initial status
   const clientRef = useRef<any>(null);
+  const [isDesktop, setIsDesktop] = useState(false);
+  const [runTour, setRunTour] = useState(false);
+  const [tourCompleted, setTourCompleted] = useState(hasTourCompleted());
 
  useEffect(() => {
   // Get user sub from auth - only run once on mount
@@ -169,23 +175,60 @@ export const VoiceAssistant = () => {
   };
 }, []); // Empty dependency array - only run once on mount
 
+  // Detect desktop vs mobile for content layout adjustment
+  useEffect(() => {
+    const checkDesktop = () => {
+      setIsDesktop(window.innerWidth >= 768);
+    };
+
+    checkDesktop();
+    window.addEventListener('resize', checkDesktop);
+    return () => window.removeEventListener('resize', checkDesktop);
+  }, []);
+
+  // Check if tour should run on first-time login
+  useEffect(() => {
+    if (!loading && !error && !tourCompleted) {
+      // Delay tour start to ensure UI is fully rendered
+      const timer = setTimeout(() => {
+        setRunTour(true);
+      }, 2000);
+      return () => clearTimeout(timer);
+    }
+  }, [loading, error, tourCompleted]);
+
+  const handleReplayTour = () => {
+    resetTour();
+    setTourCompleted(false);
+    setRunTour(true);
+  };
+
+  const handleTourComplete = () => {
+    setTourCompleted(true);
+    setRunTour(false);
+  };
+
   return (
-    <main
-      style={{
-        position: 'relative',
-        display: 'flex',
-        flexDirection: 'column',
-        minHeight: '100vh',
-        background: '#F7F9FC',
-        overflow: 'hidden',
-        paddingBottom: '120px', // Space for bottom nav
-      }}
-    >
+    <>
+      <main
+        style={{
+          position: 'relative',
+          display: 'flex',
+          flexDirection: 'column',
+          minHeight: '100vh',
+          background: '#F7F9FC',
+          overflow: 'hidden',
+          paddingBottom: '120px', // Space for bottom nav
+        }}
+      >
       {/* Animated background with floating blobs and particles */}
       <AnimatedBackground />
 
       {/* Film grain overlay */}
       <div className="film-grain" aria-hidden="true" />
+
+      {/* Side Navigation */}
+      <SideNav />
 
       {/* Main Content */}
       <motion.div
@@ -201,6 +244,7 @@ export const VoiceAssistant = () => {
           alignItems: 'center',
           justifyContent: 'center',
           padding: '32px',
+          marginLeft: isDesktop ? '80px' : '0',
         }}
       >
         {loading && (
@@ -251,7 +295,44 @@ export const VoiceAssistant = () => {
       </motion.div>
 
       {/* Responsive Navigation */}
-      <ResponsiveNav />
+      <div className="bottom-nav">
+        <ResponsiveNav />
+      </div>
     </main>
+
+    {/* Tour replay button - small info icon at top right */}
+    {tourCompleted && (
+      <motion.button
+        initial={{ opacity: 0, scale: 0.8 }}
+        animate={{ opacity: 1, scale: 1 }}
+        whileHover={{ scale: 1.1 }}
+        whileTap={{ scale: 0.9 }}
+        onClick={handleReplayTour}
+        style={{
+          position: 'fixed',
+          top: '20px',
+          right: '20px',
+          zIndex: 100000,
+          background: 'rgba(255, 255, 255, 0.9)',
+          backdropFilter: 'blur(8px)',
+          border: '1px solid rgba(14, 165, 233, 0.3)',
+          borderRadius: '50%',
+          width: '40px',
+          height: '40px',
+          cursor: 'pointer',
+          boxShadow: '0 4px 12px rgba(0, 0, 0, 0.1)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+        }}
+        title="Show tour guide"
+      >
+        <Info size={20} color="#0ea5e9" />
+      </motion.button>
+    )}
+
+    {/* Tour Guide - moved outside main for higher z-index */}
+    <TourGuide run={runTour} onTourComplete={handleTourComplete} />
+    </>
   );
 };

@@ -112,21 +112,32 @@ def get_extraction_prompt(tool_name: str, **kwargs) -> str:
     Load extraction prompt for a specific tool.
     
     Args:
-        tool_name: Name of the tool (e.g., "create_event_tool", "meetings_summary_tool")
+        tool_name: Name of the tool (e.g., "google_calendar", "meeting_discussion")
         **kwargs: Variables to substitute in the prompt template
         
     Returns:
         The prompt string with variables substituted
     """
-    # Map tool names to prompt files
-    prompt_files = {
-        "create_event_tool": "create_event_extraction.txt",
-        "meetings_summary_tool": "meetings_summary_extraction.txt",
-        "get_weather_tool": "weather_extraction.txt",
-    }
+    # Get prompt file from database
+    from app.db.db import get_db, db_execute
     
-    # Default to generic if tool not found
-    prompt_file = prompt_files.get(tool_name, "generic_extraction.txt")
+    try:
+        with get_db() as conn:
+            row = db_execute(
+                conn,
+                "SELECT extraction_prompt_file FROM skill_registry WHERE skill_name = %s",
+                (tool_name,)
+            ).fetchone()
+            
+            if not row or not row['extraction_prompt_file']:
+                logger.warning(f"No extraction prompt file found for tool: {tool_name}")
+                prompt_file = "generic_extraction.txt"
+            else:
+                prompt_file = row['extraction_prompt_file']
+    except Exception as e:
+        logger.error(f"Failed to get extraction prompt file from database: {e}")
+        prompt_file = "generic_extraction.txt"
+    
     prompt_path = PROMPTS_DIR / prompt_file
     
     if not prompt_path.exists():
@@ -219,6 +230,7 @@ def get_combined_detection_extraction_prompt(**kwargs) -> str:
     
     Args:
         **kwargs: Variables to substitute in the prompt template
+        skip_detection: If True, skip skill detection and only extract parameters
         
     Returns:
         The prompt string with variables substituted
@@ -228,11 +240,37 @@ def get_combined_detection_extraction_prompt(**kwargs) -> str:
     if not prompt_path.exists():
         logger.warning(f"Combined detection/extraction prompt file not found: {prompt_path}")
         # Fallback to basic prompt
+        skip_detection = kwargs.get('skip_detection', False)
+        if skip_detection:
+            return f'Extract parameters for the active skill from this user request: "{kwargs.get("user_input", "")}"'
         return f'Analyze this user request and extract parameters: "{kwargs.get("user_input", "")}"'
     
     # Read prompt template
     with open(prompt_path, 'r') as f:
         prompt_template = f.read()
+    
+    # Check if we should skip detection (extraction-only mode)
+    skip_detection = kwargs.get('skip_detection', False)
+    if skip_detection:
+        # In extraction-only mode, modify the prompt to focus only on parameter extraction
+        # Remove the detection section and focus on extraction
+        prompt_template = """
+You are extracting parameters for an already-active skill. The user is continuing a conversation about a specific task.
+
+%existing_params%
+
+User's latest input: %user_input%
+
+Extract ONLY the parameters for the active skill from the user's input. Return JSON with this format:
+{
+  "extracted_params": {
+    "param1": "value1",
+    "param2": "value2"
+  }
+}
+
+Focus on extracting NEW information. If a parameter was already provided, don't re-extract it unless the user is correcting it.
+"""
     
     # Format existing parameters for better LLM context
     existing_params = kwargs.get('existing_params', {})
@@ -255,12 +293,58 @@ def get_combined_detection_extraction_prompt(**kwargs) -> str:
     else:
         kwargs['context_hint'] = "No additional context provided"
     
+    # Build available skills list with descriptions based on user's installed skills
+    available_skills = kwargs.get('available_skills', [])
+    
+    # Get skill descriptions dynamically from database
+    from app.skills import load_skills
+    all_skills_data = load_skills(force_reload=False, user_sub=None)
+    
+    # Build skill descriptions from actual skill data
+    skill_descriptions = {}
+    for skill_name, skill_data in all_skills_data.items():
+        # Extract a brief description from the skill prompt
+        prompt = skill_data.get('prompt', '')
+        # Take first line or first sentence as description
+        first_line = prompt.split('\n')[0] if prompt else "Unknown skill"
+        skill_descriptions[skill_name] = first_line
+    
+    if available_skills:
+        formatted_skills = []
+        for skill in available_skills:
+            desc = skill_descriptions.get(skill, "Unknown skill")
+            formatted_skills.append(f"- {skill}: {desc}")
+        # Always include 'none' as an option (only if not skipping detection)
+        if not skip_detection:
+            formatted_skills.append("- none: Input is casual conversation, greeting, or unrelated to available skills")
+        kwargs['available_skills'] = "\n".join(formatted_skills)
+    else:
+        # No skills installed - only general conversation
+        kwargs['available_skills'] = "- none: Input is casual conversation, greeting, or unrelated to available skills"
+    
     # Substitute variables using %VAR% format to avoid JSON conflicts
     result = prompt_template
     for key, value in kwargs.items():
         placeholder = f"%{key}%"
         if placeholder in result:
             result = result.replace(placeholder, str(value))
+    
+    # Remove parameter extraction rules for tools that are not in available_skills
+    # This prevents the LLM from detecting tools that aren't installed
+    if available_skills:
+        import re
+        from app.skills import load_skills
+        
+        # Get all available skills from database (dynamic, not hardcoded)
+        all_skills_data = load_skills(force_reload=False, user_sub=None)
+        tools_to_remove = list(all_skills_data.keys())
+        
+        for tool in tools_to_remove:
+            if tool not in available_skills:
+                # Remove the parameter extraction rules section for this tool
+                pattern = rf'PARAMETER EXTRACTION RULES FOR {tool.upper()}:(.*?)(?=PARAMETER EXTRACTION RULES FOR|INTELLIGENT BEHAVIOR|USER INPUT|$)'
+                result = re.sub(pattern, '', result, flags=re.DOTALL)
+                logger.info(f"Removed parameter extraction rules for {tool} (not installed)")
     
     # Check for any remaining unsubstituted placeholders
     import re
@@ -279,21 +363,32 @@ def get_confirmation_prompt(tool_name: str, **kwargs) -> str:
     Load confirmation prompt for a specific tool.
     
     Args:
-        tool_name: Name of the tool (e.g., "create_event_tool", "meetings_summary_tool")
+        tool_name: Name of the tool (e.g., "google_calendar", "meeting_discussion")
         **kwargs: Variables to substitute in the prompt template
         
     Returns:
         The prompt string with variables substituted
     """
-    # Map tool names to confirmation prompt files
-    prompt_files = {
-        "create_event_tool": "create_event_confirmation.txt",
-        "meetings_summary_tool": "generic_confirmation.txt",
-        "get_weather_tool": "generic_confirmation.txt",
-    }
+    # Get confirmation prompt file from database
+    from app.db.db import get_db, db_execute
     
-    # Default to generic if tool not found
-    prompt_file = prompt_files.get(tool_name, "generic_confirmation.txt")
+    try:
+        with get_db() as conn:
+            row = db_execute(
+                conn,
+                "SELECT confirmation_prompt_file FROM skill_registry WHERE skill_name = %s",
+                (tool_name,)
+            ).fetchone()
+            
+            if not row or not row['confirmation_prompt_file']:
+                logger.warning(f"No confirmation prompt file found for tool: {tool_name}")
+                prompt_file = "generic_confirmation.txt"
+            else:
+                prompt_file = row['confirmation_prompt_file']
+    except Exception as e:
+        logger.error(f"Failed to get confirmation prompt file from database: {e}")
+        prompt_file = "generic_confirmation.txt"
+    
     prompt_path = PROMPTS_DIR / prompt_file
     
     if not prompt_path.exists():

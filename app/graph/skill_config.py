@@ -15,7 +15,7 @@ This makes the system extensible - adding new tools only requires adding
 a configuration entry, not modifying core logic.
 
 HOW TO ADD NEW TOOLS:
-1. Add a configuration entry in TOOL_CONFIGS with:
+1. Add a configuration entry in skill_registry database table with:
    - required_fields: list of required parameter names
    - optional_fields: list of optional parameter names  
    - is_read_only: True for read-only tools (get data), False for write-enabled tools (create/update/delete)
@@ -28,7 +28,23 @@ HOW TO ADD NEW TOOLS:
    - Missing field detection and prompting
    - Dynamic context formatting
 3. No hardcoded logic needed in pipecat_agent.py or other core files
+
+DATABASE-BACKED CONFIGURATION:
+Skill configurations are now loaded from the skill_registry table in the database.
+This makes the system dynamic and scalable - adding new skills only requires
+a database insert, not code changes.
 """
+
+import json
+import logging
+from app.db.db import get_db, db_execute
+
+logger = logging.getLogger(__name__)
+
+# Cache for skill configurations
+_skill_config_cache = None
+_cache_timestamp = None
+CACHE_TTL = 300  # 5 minutes
 
 # Global configuration (tool-independent)
 GLOBAL_CONFIG = {
@@ -67,123 +83,85 @@ def get_default_timezone() -> str:
     return GLOBAL_CONFIG["default_timezone"]
 
 
-TOOL_CONFIGS = {
-    "create_event_tool": {
-        "required_fields": ["date", "time", "meeting_mode", "description", "name"],
-        "optional_fields": ["duration", "location", "city", "title"],
-        "state_key": "meetings",  # Dynamic: meetings array for create_event_tool
-        "requires_confirmation": True,
-        "state_reset_on_cancel": True,
-        "extraction_prompt": "create_event_extraction.txt",
-        "confirmation_prompt": "create_event_confirmation.txt",
-        "is_read_only": False,
-        "context_formatter": "format_meeting_context",
-        "fallback_rules": {
-            "meeting_mode": [
-                {"pattern": "online", "value": "online"},
-                {"pattern": "in-person|in person|face-to-face", "value": "in_person"}
-            ],
-            "time": [
-                {"pattern": r"(\d{1,2})(?:am|pm)", "extract": "time_24h"}
-            ],
-            "duration": {"default": "1 hour"}
-        },
-        "parameter_overrides": {
-            "date": {"today": "current_date", "tomorrow": "tomorrow_date"}
-        },
-        "protection_rules": {
-            "time": {"protect_from_fragments": True},
-            "date": {"protect_from_fragments": True}
-        },
-        # Context keywords for detecting tool relevance
-        "context_keywords": [
-            "meeting", "book", "schedule", "appointment", 
-            "call", "discuss", "talk"
-        ],
-        # Confirmation phrases for execution (tiered approach)
-        # Tier 1: Natural confirmations (when all required fields present)
-        # Tier 2: Explicit action phrases (for re-confirmation or uncertain situations)
-        "confirmation_phrases": [
-            # Tier 1: Natural confirmations
-            "yes", "yeah", "yep", "correct", "right", "that's right", "that's correct",
-            "sounds good", "perfect", "great", "exactly", "absolutely", "sure",
-            "please do", "please proceed", "okay", "alright", "fine",
+def load_skill_configs(force_reload=False) -> dict:
+    """Load skill configurations from database with caching.
+    
+    Args:
+        force_reload: If True, bypass cache and reload from database
+        
+    Returns:
+        Dictionary of skill configurations
+    """
+    global _skill_config_cache, _cache_timestamp
+    
+    import time
+    current_time = time.time()
+    
+    # Check cache first
+    if not force_reload and _skill_config_cache is not None:
+        if current_time - _cache_timestamp < CACHE_TTL:
+            return _skill_config_cache
+    
+    # Load from database
+    configs = {}
+    try:
+        with get_db() as conn:
+            rows = db_execute(
+                conn,
+                "SELECT * FROM skill_registry WHERE is_active = TRUE"
+            ).fetchall()
             
-            # Tier 2: Explicit action phrases (for re-confirmation)
-            "do it", "go ahead", "execute it", "proceed", "book it",
-            "please book", "schedule it", "create it", "that's correct, do it",
-            "book now", "you can book", "yes book it", "yes do it",
-            "confirm", "proceed with booking", "proceed with scheduling"
-        ],
-        # Name extraction patterns
-        "name_extraction_patterns": [
-            r'\bwith\s+([A-Z][a-z]+)',  # "with Manish"
-            r'\bdirector\s+(?:whose\s+name\s+is\s+)?([A-Z][a-z]+)',  # "director Smith" or "director whose name is Manish"
-            r'\bmanager\s+([A-Z][a-z]+)',  # "manager Alex"
-            r'\bmeeting\s+([A-Z][a-z]+)',  # "meeting John"
-            r'\bto\s+([A-Z][a-z]+)',  # "to Smith" (as in "talk to Smith")
-            r'\bnamed\s+([A-Z][a-z]+)',  # "named John"
-        ],
-        # Continuation words for description merging
-        "continuation_words": ["as well as", "and also", "plus", "also", "and"],
-        # Default values for fields (only for optional fields, not required ones)
-        "default_values": {
-            "timezone": "Europe/Berlin",
-            "duration": "1 hour"
-            # Removed defaults for required fields (name, meeting_mode) to prevent premature booking
-        },
-        # Corruption indicators for validation (specific phrases that indicate corrupted state)
-        "corruption_indicators": [
-            "book another meeting", "cancel this", "stop the booking", "never mind about this", "forget this meeting"
-        ],
-        # Time extraction pattern
-        "time_pattern": r'(\d{1,2})(?:am|pm)'
-    },
-    "meetings_summary_tool": {
-        "required_fields": ["date"],
-        "optional_fields": [],
-        "state_key": "meetings_summary",
-        "requires_confirmation": False,
-        "state_reset_on_cancel": False,
-        "extraction_prompt": "meetings_summary_extraction.txt",
-        "confirmation_prompt": None,
-        "is_read_only": True,
-        "context_formatter": "format_summary_context"
-    },
-    "get_weather_tool": {
-        "required_fields": ["city"],
-        "optional_fields": ["date"],
-        "state_key": "weather_data",
-        "requires_confirmation": False,
-        "state_reset_on_cancel": False,
-        "extraction_prompt": "weather_extraction.txt",
-        "confirmation_prompt": None,
-        "is_read_only": True,
-        "context_formatter": "format_weather_context"
-    },
-    "general_conversation": {
-        "required_fields": [],
-        "optional_fields": [],
-        "state_key": None,
-        "requires_confirmation": False,
-        "state_reset_on_cancel": False,
-        "extraction_prompt": None,
-        "confirmation_prompt": None,
-        "is_read_only": True,
-        "context_formatter": None
-    },
-    "cancel_event": {
-        "required_fields": [],
-        "optional_fields": [],
-        "state_key": None,
-        "requires_confirmation": False,
-        "state_reset_on_cancel": True,
-        "extraction_prompt": None,
-        "confirmation_prompt": None,
-        "is_read_only": False,
-        "context_formatter": None
-    }
-}
+            for row in rows:
+                skill_name = row['skill_name']
+                configs[skill_name] = {
+                    "required_fields": json.loads(row['required_fields']) if row['required_fields'] else [],
+                    "optional_fields": json.loads(row['optional_fields']) if row['optional_fields'] else [],
+                    "state_key": row['state_key'],
+                    "extraction_prompt": row['extraction_prompt_file'],
+                    "confirmation_prompt": row['confirmation_prompt_file'],
+                    "detection_keywords": json.loads(row['detection_keywords']) if row['detection_keywords'] else [],
+                    "display_name": row['display_name'],
+                    "description": row['description'],
+                    # Default values for backward compatibility
+                    "requires_confirmation": True,
+                    "state_reset_on_cancel": True,
+                    "is_read_only": False,
+                    "context_formatter": None,
+                    "fallback_rules": {},
+                    "parameter_overrides": {},
+                    "protection_rules": {},
+                    "confirmation_phrases": [],
+                    "name_extraction_patterns": [],
+                    "continuation_words": [],
+                    "default_values": {},
+                    "corruption_indicators": [],
+                    "time_pattern": r'(\d{1,2})(?:am|pm)'
+                }
+                
+                # Set read-only based on skill type
+                if skill_name in ["meeting_discussion", "get_weather"]:
+                    configs[skill_name]["is_read_only"] = True
+                    configs[skill_name]["requires_confirmation"] = False
+                    configs[skill_name]["state_reset_on_cancel"] = False
+                
+                # Set context formatter based on skill
+                if skill_name == "google_calendar":
+                    configs[skill_name]["context_formatter"] = "format_meeting_context"
+                elif skill_name == "meeting_discussion":
+                    configs[skill_name]["context_formatter"] = "format_summary_context"
+                elif skill_name == "get_weather":
+                    configs[skill_name]["context_formatter"] = "format_weather_context"
+        
+        _skill_config_cache = configs
+        _cache_timestamp = current_time
+        logger.info(f"Loaded {len(configs)} skill configurations from database")
+        
+    except Exception as e:
+        logger.error(f"Failed to load skill configurations from database: {e}")
+        # Return empty dict on error
+        return {}
+    
+    return configs
 
 
 def get_tool_config(tool_name: str) -> dict:
@@ -191,12 +169,13 @@ def get_tool_config(tool_name: str) -> dict:
     Get configuration for a specific tool.
     
     Args:
-        tool_name: Name of the tool (e.g., "create_event_tool")
+        tool_name: Name of the tool (e.g., "google_calendar")
         
     Returns:
         Tool configuration dictionary, or empty dict if tool not found
     """
-    return TOOL_CONFIGS.get(tool_name, {})
+    configs = load_skill_configs()
+    return configs.get(tool_name, {})
 
 
 def get_required_fields(tool_name: str) -> list:
@@ -330,8 +309,8 @@ def format_meeting_context(params: dict) -> str:
         return ""
     
     # Focus on the most relevant meeting parameters (dynamic state access)
-    tool_specific_state = params.get("tool_specific_state", {})
-    meetings = tool_specific_state.get("meetings", [])
+    skill_specific_state = params.get("skill_specific_state", {})
+    meetings = skill_specific_state.get("meetings", [])
     if meetings and isinstance(meetings, list) and len(meetings) > 0:
         meeting = meetings[0]
         context_parts = []

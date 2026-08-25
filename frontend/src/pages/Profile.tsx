@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion, Easing, AnimatePresence } from 'framer-motion';
 import { ResponsiveNav } from '../components/ResponsiveNav';
+import { SideNav } from '../components/SideNav';
 import { AnimatedBackground } from '../components/motion/AnimatedBackground';
 import { useLottie } from 'lottie-react'; // Import Lottie hook
 
@@ -79,6 +80,7 @@ export const Profile = () => {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
+  const [isDesktop, setIsDesktop] = useState(false);
   const [editFormData, setEditFormData] = useState({
     work_description: '',
     industry: '',
@@ -90,6 +92,17 @@ export const Profile = () => {
   useEffect(() => {
     checkAuth();
     loadProfile();
+  }, []);
+
+  // Detect desktop vs mobile for content layout adjustment
+  useEffect(() => {
+    const checkDesktop = () => {
+      setIsDesktop(window.innerWidth >= 768);
+    };
+
+    checkDesktop();
+    window.addEventListener('resize', checkDesktop);
+    return () => window.removeEventListener('resize', checkDesktop);
   }, []);
 
   const checkAuth = async () => {
@@ -260,6 +273,9 @@ export const Profile = () => {
       <AnimatedBackground accentColor="#6EB5FF" />
       <div className="film-grain" aria-hidden="true" />
 
+      {/* Side Navigation */}
+      <SideNav />
+
       <motion.div
         variants={containerVariants}
         initial="hidden"
@@ -271,6 +287,7 @@ export const Profile = () => {
           margin: '0 auto',
           padding: '32px',
           width: '100%',
+          marginLeft: isDesktop ? '80px' : '0',
         }}
       >
         {/* User Header Section */}

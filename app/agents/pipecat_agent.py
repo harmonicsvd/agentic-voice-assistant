@@ -9,6 +9,12 @@ import os
 import logging
 import asyncio
 import difflib
+
+# Set environment variables for offline model loading BEFORE importing Pipecat
+os.environ["HF_HOME"] = os.path.expanduser("~/.cache/huggingface")
+os.environ["HF_HUB_OFFLINE"] = "1"
+os.environ["TRANSFORMERS_OFFLINE"] = "1"
+
 from pipecat.services.openai.llm import OpenAILLMService
 from pipecat.services.whisper.stt import WhisperSTTService
 from pipecat.services.piper.tts import PiperTTSService
@@ -19,8 +25,8 @@ from pipecat.processors.frame_processor import FrameProcessor
 from pipecat.workers.llm.llm_context_worker import LLMContext, LLMContextAggregatorPair, LLMUserAggregatorParams
 from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.audio.vad.vad_analyzer import VADParams
-from app.skills import get_skill_prompts
-from app.graph.tool_config import get_formatted_context
+from app.skills import get_skill_prompts, get_all_skills
+from app.graph.skill_config import get_formatted_context
 from pipecat.frames.frames import (
     AudioRawFrame, TextFrame, TranscriptionFrame,
     UserStartedSpeakingFrame, UserStoppedSpeakingFrame,
@@ -33,7 +39,7 @@ from pipecat.processors.frame_processor import FrameDirection
 
 from app.graph.state import PlannerState
 from app.graph.planner import LangGraphPlanner
-from app.graph.tool_config import is_read_only_tool, is_write_enabled_tool
+from app.graph.skill_config import is_read_only_tool, is_write_enabled_tool
 import time
 from datetime import datetime
 import numpy as np
@@ -56,7 +62,7 @@ logging.getLogger("pipecat.serializers.protobuf").setLevel(logging.DEBUG)
 class ConversationLogger(FrameProcessor):
     """Clean, production-style logger for voice conversation lifecycle."""
     
-    def __init__(self, log_file="conversations.txt", tool_executor=None, wake_word_processor=None):
+    def __init__(self, log_file="conversations.txt", skill_executor=None, wake_word_processor=None):
         super().__init__()
         self.speech_start_time = None
         self.stt_start_time = None
@@ -65,10 +71,11 @@ class ConversationLogger(FrameProcessor):
         self.audio_buffer = []
         self.log_file = log_file
         self.wake_word_processor = wake_word_processor
-        self.tool_executor=tool_executor
+        self.skill_executor=skill_executor
         self.last_bot_speech_time = None
         self.sleep_timeout = 10  # seconds of silence before sleep
         self.wake_up_latency_start = None  # Track wake-up latency
+        self.is_processing = False  # Track if system is actively processing (LLM, skill execution, API calls)
 
         # Create log file with timestamp header
         with open(log_file, "a", encoding="utf-8") as f:
@@ -79,8 +86,8 @@ class ConversationLogger(FrameProcessor):
     async def process_frame(self, frame, direction):
         frame_name = frame.__class__.__name__
 
-        # Check for timeout-based sleep
-        if not self.wake_word_processor.is_sleeping and self.last_bot_speech_time:
+        # Check for timeout-based sleep (only if not actively processing)
+        if not self.wake_word_processor.is_sleeping and self.last_bot_speech_time and not self.is_processing:
             time_since_last_speech = time.time() - self.last_bot_speech_time
             if time_since_last_speech > self.sleep_timeout:
                 logger.info(f"💤 Timeout: No user response for {time_since_last_speech:.0f}s - putting agent to sleep")
@@ -217,7 +224,7 @@ async def _generate_concise_summary(conversation_history: list, params: dict, ll
     Generate a concise summary from conversation history and parameters using LLM.
     
     This avoids long repetitive confirmations by asking the LLM to summarize
-    the conversation context in 1-2 sentences. Works for all tools, not just events.
+    the conversation context in 1-2 sentences. Works for all skills, not just events.
     
     Only calls LLM if context is large (>500 chars), otherwise uses parameter-based summary.
     """
@@ -295,14 +302,14 @@ Summary:"""
                     "Content-Type": "application/json"
                 },
                 json={
-                    "model": "llama-3.3-70b-versatile",  # Use Groq's Llama 3.3 70B model
+                    "model": "openai/gpt-oss-120b",  # Use Groq's GPT OSS 120B model (replacement for discontinued Llama 3.3 70B)
                     "messages": [
                         {"role": "system", "content": "You are a helpful assistant. Summarize the following meeting parameters in a single sentence. Be concise."},
                         {"role": "user", "content": summarization_prompt}
                     ],
                     "temperature": 0.1
                 },
-                timeout=10.0
+                timeout=30.0
             )
             response.raise_for_status()
             result = response.json()
@@ -609,18 +616,20 @@ class WakeWordProcessor(FrameProcessor):
             await self.push_frame(frame, direction)
 
 
-class ToolExecutionProcessor(FrameProcessor):
-    """Ram passes user input to Sham for tool decisions."""
+class SkillExecutionProcessor(FrameProcessor):
+    """Ram passes user input to Sham for skill decisions."""
 
-    def __init__(self, planner: LangGraphPlanner, context: LLMContext, llm, wake_word_processor):
+    def __init__(self, planner: LangGraphPlanner, context: LLMContext, llm, wake_word_processor, user_sub: str = None):
         super().__init__()
         self.planner = planner
         self.context = context
         self.llm = llm  # LLM for summarization
+        self.user_sub = user_sub  # Store user_sub for skill filtering
         self.accumulated_params = {}  # Persist params across conversation turns
         self.active_tool = None  # Track which tool is currently active
         self.wake_word_processor = wake_word_processor  # Reference to wake word processor
         self._should_sleep_after_response = False  # Flag to sleep after unclear responses
+        self.conversation_history = []  # Track conversation history for planner
 
     async def process_frame(self, frame, direction):
         frame_name = frame.__class__.__name__
@@ -657,34 +666,91 @@ class ToolExecutionProcessor(FrameProcessor):
         if isinstance(frame, TranscriptionFrame):
             user_input = frame.text
             logger.info(f"🎤 Received transcription: {user_input}")
+            
+            # Add user message to conversation history
+            self.conversation_history.append({"role": "user", "content": user_input})
+            
+            # Get ALL skills from database (both installed and uninstalled) for detection
+            # This allows the LLM to detect intent correctly even for uninstalled skills
+            from app.skills import load_skills
+            all_skills_dict = load_skills(force_reload=False)  # Use cache, only reload on install/uninstall
+            all_skill_names = list(all_skills_dict.keys())
+            logger.debug(f"All skill names from cache/database: {all_skill_names}")
 
-            # Get conversation context
-            messages = self.context.get_messages() if hasattr(self.context, 'get_messages') else []
+            # Get installed skills for execution filtering - always reload to get fresh data
+            available_skills_for_user = get_all_skills(user_sub=self.user_sub)
+            installed_skill_names = [skill["name"] if isinstance(skill, dict) else skill.name for skill in available_skills_for_user]
+            logger.debug(f"Installed skill names for user {self.user_sub}: {installed_skill_names}")
+            
+            # Remove old "skill not installed" messages from context if skills have changed
+            # This prevents LLM from thinking a skill is still missing after installation
+            if hasattr(self, '_last_installed_skills') and self._last_installed_skills != set(installed_skill_names):
+                logger.info(f"🔄 Skills changed from {self._last_installed_skills} to {set(installed_skill_names)} - clearing old skill messages from context")
+                # Filter out old skill-related system messages to prevent context bloat and stale information
+                # LLMContext doesn't have a setter for messages, so we need to clear and rebuild
+                old_messages = self.context.get_messages()
+                filtered_messages = [
+                    msg for msg in old_messages 
+                    if not (msg.get("role") == "system" and 
+                           ("CRITICAL OVERRIDE" in msg.get("content", "") or 
+                            "CURRENT AVAILABLE SKILLS" in msg.get("content", "") or
+                            "EMERGENCY: TOOL EXECUTION WAS SKIPPED" in msg.get("content", "") or
+                            "SKILL EXECUTION SUCCESSFUL" in msg.get("content", "")))
+                ]
+                # Clear all messages and add back the filtered ones
+                self.context._messages = filtered_messages
+                logger.info(f"🔄 Cleared {len(old_messages) - len(filtered_messages)} old skill messages from context")
+            
+            self._last_installed_skills = set(installed_skill_names)
+            
+            # Add dynamic system message with current available skills to keep LLM in sync
+            # This is important because the system prompt is loaded once at connection time
+            # but skills can be installed/uninstalled during an active session
+            if installed_skill_names:
+                skills_list = ", ".join(installed_skill_names)
+                self.context.add_message({
+                    "role": "system",
+                    "content": f"CURRENT AVAILABLE SKILLS: You currently have these skills installed: {skills_list}. Do NOT attempt to use any skills not in this list. If the user asks for something requiring a skill not in this list, tell them they need to install that skill first."
+                })
+                logger.info(f"📥 Added dynamic skills list to context: {skills_list}")
+            else:
+                self.context.add_message({
+                    "role": "system",
+                    "content": "CURRENT AVAILABLE SKILLS: You currently have NO skills installed. If the user asks to do anything, tell them they need to install the required skill first."
+                })
+                logger.info(f"📥 Added empty skills list to context")
 
-            # Call planner to detect if tool is needed
+            # Run the LangGraph planner with ALL skills for detection
             result = await self.planner.plan_and_execute(
-                user_input,
-                conversation_history=messages,
-                accumulated_params=self.accumulated_params
+                user_input=user_input,
+                conversation_history=self.conversation_history,  # Pass conversation history to planner
+                accumulated_params=self.accumulated_params,
+                available_skills=all_skill_names,  # Pass ALL skills for detection, not just installed
+                installed_skills=installed_skill_names  # Pass installed skills for execution check
             )
-
+            
+            pipeline_status = result.get("pipeline_status")
+            detected_skills = result.get("detected_skills", [])
+            
             # Update accumulated params from result
             if result.get("collected_params"):
                 self.accumulated_params.update(result["collected_params"])
                 logger.info(f"📤 Accumulated params updated: {self.accumulated_params}")
             
-            # Store the active tool for context formatting
-            if result.get("detected_tools"):
-                self.active_tool = result["detected_tools"][0] if result["detected_tools"] else None
-                logger.info(f"🎯 Active tool set: {self.active_tool}")
+            # Store the active skill for context formatting
+            # Use detected_skills (from optimized graph)
+            detected_skills = result.get("detected_skills", [])
+            if detected_skills:
+                self.active_skill = detected_skills[0] if detected_skills else None
+                logger.info(f"🎯 Active skill set: {self.active_skill}")
 
             # Check if general_conversation was detected - this means user wants general advice/chat
-            detected_tools = result.get("detected_tools", [])
-            if "general_conversation" in detected_tools:
+            if "general_conversation" in detected_skills:
                 logger.info(f"💬 General conversation detected - switching to conversational mode")
                 # Clear any accumulated params since this is not meeting-related
                 self.accumulated_params = {}
                 self.active_tool = None
+                self.conversation_history = []  # Reset conversation history
                 # Add a system message to inform the LLM this is general conversation
                 self.context.add_message({
                     "role": "system",
@@ -697,23 +763,23 @@ class ToolExecutionProcessor(FrameProcessor):
                     "content": user_input
                 })
                 logger.info(f"📥 Added user message to context for general conversation")
-                # Skip the rest of the tool result handling since there are no results
+                # Skip the rest of the skill result handling since there are no results
                 # Continue to the end of the function to let the LLM respond normally
-                result["tool_results"] = []  # Ensure tool_results is empty list to skip result processing
+                result["skill_results"] = []  # Ensure skill_results is empty list to skip result processing
             
-            # Check if no tool was detected - this means the planner decided no action is needed
-            # In this case, we should NOT add fake tool results to the context
-            elif not detected_tools and not result["tool_results"]:
-                logger.info(f"🚫 No tool detected and no tool results - skipping fake result injection")
+            # Check if no skill was detected - this means the planner decided no action is needed
+            elif not detected_skills and not result["skill_results"]:
+                logger.info(f"🚫 No skill detected and no skill results - skipping fake result injection")
                 
                 # Clear params but don't sleep - keep agent awake for conversation
                 was_in_task = self.active_tool is not None
                 self.accumulated_params = {}
                 self.active_tool = None
+                self.conversation_history = []  # Reset conversation history
                 
                 # Don't automatically sleep - let the conversation continue naturally
                 # Sleep should only happen via timeout or explicit user action
-                logger.info(f"� General conversation - keeping agent awake")
+                logger.info(f"💬 General conversation - keeping agent awake")
                 
                 # Add a system message to inform the LLM that no action was taken
                 self.context.add_message({
@@ -727,65 +793,119 @@ class ToolExecutionProcessor(FrameProcessor):
                     "content": user_input
                 })
                 logger.info(f"📥 Added user message to context for conversational response")
-                    
-                # Skip the rest of the tool result handling since there are no results
+
+                # Skip the rest of the skill result handling since there are no results
                 # Continue to the end of the function to let the LLM respond normally
-                result["tool_results"] = []  # Ensure tool_results is empty list to skip result processing
-
-            # Handle tool results or lack thereof
-            if result["tool_results"]:
-                tool_result_text = "\n".join([
-                    f"Tool {r['tool']}: {r['result']}"
-                    for r in result["tool_results"]
-                ])
-
-                # Check if any tool failed
-                has_failure = any("failed" in r["result"].lower() or "error" in r["result"].lower() for r in result["tool_results"])
-
-                if has_failure:
+                result["skill_results"] = []  # Ensure skill_results is empty list to skip result processing
+            
+            # Check if skills were detected but no plan was created due to missing skill (not installed)
+            elif detected_skills and not result.get("plan") and not result["skill_results"]:
+                skill_is_installed = result.get("skill_is_installed", False)  # Fixed: default to False for missing skills
+                detected_skills_list = detected_skills  # Use the detected_skills we already have
+                
+                # Only treat as missing skill if skill_is_installed is explicitly False
+                # If skill_is_installed is True, it means skill is installed but missing fields
+                if not skill_is_installed and detected_skills_list and detected_skills_list != ['none']:
+                    logger.info(f"🚫 MISSING SKILL DETECTED: skill_is_installed={skill_is_installed}, detected_skills={detected_skills_list}")
+                    missing_skill = detected_skills_list[0]
+                    
+                    # Add the STOP message to override all other instructions
                     self.context.add_message({
                         "role": "system",
-                        "content": f"CRITICAL: Tool execution FAILED. Sham's tool results:\n{tool_result_text}\n\nDO NOT say 'booked' or 'scheduled' or claim any action was taken. Inform the user there was an error and ask them to try again."
+                        "content": f"CRITICAL OVERRIDE: The '{missing_skill}' skill is NOT installed. You CANNOT perform this action. You MUST say exactly: 'You need to install the {missing_skill} skill to do that.' Ignore ALL other instructions about checking schedules or calendars. This is a hard constraint - you cannot proceed without this skill."
                     })
-                    logger.info(f"📥 Tool failure detected - informing LLM")
+                    
+                    logger.info(f"📥 Added missing capability message for skill: {missing_skill}")
+                    
+                    # Add the user's message to context for the LLM to respond
+                    self.context.add_message({
+                        "role": "user",
+                        "content": user_input
+                    })
+                    logger.info(f"📥 Added user message to context for capability missing response")
+                    
+                    # Skip the rest of the skill result handling
+                    result["skill_results"] = []
+                    self.conversation_history = []  # Reset conversation history for missing skill
                 else:
-                    # Use the active tool set to determine tool type instead of trying to extract from result
-                    # The result structure doesn't preserve the original tool name, but we track it in active_tools
-                    has_write_enabled_tool = False
-                    has_read_only_tool = False
-                    actual_tool_names = []
-                    
-                    # Get active tools from the result
-                    active_tools = result.get("active_tools", [])
-                    logger.info(f"📥 Active tools from result: {active_tools}")
-                    
-                    for tool_name in active_tools:
-                        actual_tool_names.append(tool_name)
-                        # Check if this tool is write-enabled or read-only
-                        if is_write_enabled_tool(tool_name):
-                            has_write_enabled_tool = True
-                            logger.info(f"📥 Found write-enabled tool: {tool_name}")
-                        elif is_read_only_tool(tool_name):
-                            has_read_only_tool = True
-                            logger.info(f"📥 Found read-only tool: {tool_name}")
-                    
-                    logger.info(f"📥 Tool analysis - names: {actual_tool_names}, has_write_enabled: {has_write_enabled_tool}, has_read_only: {has_read_only_tool}")
+                    # Skill is installed but no plan created - let it fall through to missing fields check
+                    logger.info(f"🚫 Skills detected but no plan created - skill_is_installed={skill_is_installed}, will check for missing fields")
+                    # Don't skip - let it fall through to the missing fields check below
 
-                    if has_write_enabled_tool:
-                        # At least one write-enabled tool was executed - confirm the action
-                        # Generic approach: works for create_event_tool and any future write-enabled tools
-                        num_results = len(result.get("tool_results", []))
-                        
+            # Handle skill results or lack thereof
+            if result["skill_results"]:
+                skill_result_text = "\n".join([
+                    f"Skill {r.get('skill', r.get('tool', 'unknown'))}: {r['result']}"
+                    for r in result["skill_results"]
+                ])
+
+                # Check if any skill failed
+                has_failure = any("failed" in r["result"].lower() or "error" in r["result"].lower() for r in result["skill_results"])
+                
+                # Check if user lacks capabilities (skill not installed)
+                has_missing_capability = any("don't have the capability" in r["result"].lower() or "not available" in r["result"].lower() for r in result["skill_results"])
+                
+                # Check if skills were actually executed (results contain meaningful data)
+                has_executed_skills = any(r.get("success", False) for r in result["skill_results"])
+
+                if has_missing_capability:
+                    # User doesn't have the required skill installed
+                    self.context.add_message({
+                        "role": "system",
+                        "content": f"CAPABILITY MISSING: {skill_result_text}\n\nInform the user that they need to install the required skill to perform this action. Be helpful and suggest they check their skill settings."
+                    })
+                    logger.info(f"📥 Missing capability detected - informing LLM")
+                elif has_failure:
+                    self.context.add_message({
+                        "role": "system",
+                        "content": f"CRITICAL: Skill execution FAILED. Sham's skill results:\n{skill_result_text}\n\nDO NOT say 'booked' or 'scheduled' or claim any action was taken. Inform the user there was an error and ask them to try again."
+                    })
+                    logger.info(f"📥 Skill failure detected - informing LLM")
+                elif has_executed_skills:
+                    # Skills were executed successfully
+                    self.context.add_message({
+                        "role": "system",
+                        "content": f"SKILL EXECUTION SUCCESSFUL: {skill_result_text}\n\nUse this information to respond to the user naturally. For read-only skills (like meeting_discussion), share the results directly. For write-enabled skills (like google_calendar), confirm the action was completed."
+                    })
+                    logger.info(f"📥 Skills executed successfully - informing LLM")
+                else:
+                    # Use the active skill set to determine skill type instead of trying to extract from result
+                    # The result structure doesn't preserve the original skill name, but we track it in active_skills
+                    has_write_enabled_skill = False
+                    has_read_only_skill = False
+                    actual_skill_names = []
+
+                    # Get active skills from the result
+                    active_skills = result.get("active_skills", [])
+                    logger.info(f"📥 Active skills from result: {active_skills}")
+
+                    for skill_name in active_skills:
+                        actual_skill_names.append(skill_name)
+                        # Check if this skill is write-enabled or read-only
+                        if is_write_enabled_tool(skill_name):
+                            has_write_enabled_skill = True
+                            logger.info(f"📥 Found write-enabled skill: {skill_name}")
+                        elif is_read_only_tool(skill_name):
+                            has_read_only_skill = True
+                            logger.info(f"📥 Found read-only skill: {skill_name}")
+
+                    logger.info(f"📥 Skill analysis - names: {actual_skill_names}, has_write_enabled: {has_write_enabled_skill}, has_read_only: {has_read_only_skill}")
+
+                    if has_write_enabled_skill:
+                        # At least one write-enabled skill was executed - confirm the action
+                        # Generic approach: works for create_event_skill and any future write-enabled skills
+                        num_results = len(result.get("skill_results", []))
+
                         if num_results > 1:
-                            confirmation_msg = f"Sham's tool results:\n{tool_result_text}\n\nIMPORTANT: All {num_results} actions have been successfully completed. Confirm this to the user in a brief, natural way. Do NOT ask if anything else is needed - just confirm the completion."
+                            confirmation_msg = f"Sham's skill results:\n{skill_result_text}\n\nIMPORTANT: All {num_results} actions have been successfully completed. Confirm this to the user in a brief, natural way. Do NOT ask if anything else is needed - just confirm the completion."
                         else:
-                            confirmation_msg = f"Sham's tool results:\n{tool_result_text}\n\nIMPORTANT: The action has been successfully completed. Confirm this to the user in a brief, natural way (e.g., 'Great, I've done that for you.'). Do NOT ask if anything else is needed - just confirm the completion."
-                    elif has_read_only_tool:
-                        # All tools are read-only - just share information
-                        confirmation_msg = f"TOOL EXECUTION RESULTS:\n{tool_result_text}\n\nYour task: Share this information with the user in a brief, natural way. Do NOT mention 'tool results' or 'Sham'. Just tell the user what you found in a conversational manner. DO NOT claim any booking or scheduling happened - this is read-only information."
+                            confirmation_msg = f"Sham's skill results:\n{skill_result_text}\n\nIMPORTANT: The action has been successfully completed. Confirm this to the user in a brief, natural way (e.g., 'Great, I've done that for you.'). Do NOT ask if anything else is needed - just confirm the completion."
+                    elif has_read_only_skill:
+                        # All skills are read-only - just share information
+                        confirmation_msg = f"SKILL EXECUTION RESULTS:\n{skill_result_text}\n\nYour task: Share this information with the user in a brief, natural way. Do NOT mention 'skill results' or 'Sham'. Just tell the user what you found in a conversational manner. DO NOT claim any booking or scheduling happened - this is read-only information."
                     else:
-                        # Fallback for unknown tools or tools not in config
-                        confirmation_msg = f"TOOL EXECUTION RESULTS:\n{tool_result_text}\n\nYour task: Share this information with the user in a brief, natural way."
+                        # Fallback for unknown skills or skills not in config
+                        confirmation_msg = f"SKILL EXECUTION RESULTS:\n{skill_result_text}\n\nYour task: Share this information with the user in a brief, natural way."
 
                     self.context.add_message({
                         "role": "system",
@@ -811,13 +931,15 @@ class ToolExecutionProcessor(FrameProcessor):
                 missing_fields = result.get("missing_required_fields")
                 logger.info(f"🔍 DEBUG: missing_required_fields from result: {missing_fields}")
                 if missing_fields:
-                    # Provide specific feedback to LLM about what's missing
-                    missing_fields_msg = f"EMERGENCY: TOOL EXECUTION WAS SKIPPED. The action was NOT completed. Required fields are missing: {', '.join(missing_fields)}. DO NOT say 'booked', 'scheduled', 'done', 'completed', or claim any action was taken. Ask the user for the missing information: {', '.join(missing_fields)}. This is critical - the backend did NOT execute the tool."
+                    # Provide specific feedback to LLM about what's missing, including the skill name
+                    # Use active_skill (set from detected_skills)
+                    skill_name = self.active_skill or result.get("detected_skills", [""])[0] if result.get("detected_skills") else "this skill"
+                    missing_fields_msg = f"EMERGENCY: TOOL EXECUTION WAS SKIPPED. The action was NOT completed. Required fields are missing: {', '.join(missing_fields)}. The user is trying to use the '{skill_name}' skill. DO NOT say 'booked', 'scheduled', 'done', 'completed', or claim any action was taken. Ask the user for the missing information: {', '.join(missing_fields)}. If the user asks about capabilities, tell them they need to install the '{skill_name}' skill. This is critical - the backend did NOT execute the tool."
                     self.context.add_message({
                         "role": "system",
                         "content": missing_fields_msg
                     })
-                    logger.info(f"🚫 Added missing fields feedback to LLM: {missing_fields}")
+                    logger.info(f"🚫 Added missing fields feedback to LLM: {missing_fields} (skill: {skill_name})")
                 
                 # Add context about collected parameters to help Ram understand the conversation state
                 if self.accumulated_params and self.active_tool:
@@ -828,6 +950,14 @@ class ToolExecutionProcessor(FrameProcessor):
                         # Add as system message to give Ram visibility into what's been collected
                         self.context.add_messages([{"role": "system", "content": context_msg}])
                         logger.info(f"🧠 Added parameter context to Ram ({self.active_tool}): {context_msg[:100]}...")
+            
+            self.is_processing = False  # Mark processing as complete
+        
+        # Track assistant responses from LLM
+        elif isinstance(frame, TextFrame) and direction == FrameDirection.DOWNSTREAM:
+            # TextFrame in downstream direction contains LLM responses
+            logger.debug(f"🤖 Assistant response: {frame.text}")
+            self.conversation_history.append({"role": "assistant", "content": frame.text})
 
         # Pass all frames through
         await super().process_frame(frame, direction)
@@ -860,15 +990,21 @@ def create_voice_agent_pipeline(transport, user_sub: str = None, sleep_state_cal
         raise ValueError("GROQ_API_KEY environment variable is required but not set. Please get your API key from https://console.groq.com/keys and add it to your .env file.")
 
     # Initialize STT service (Whisper)
-    # Using "base" model for speed - if you need better accent recognition, change to "small"
-    # "base" = faster, "small" = better accents but slower, "medium" = best accuracy but slowest
-    stt = WhisperSTTService(
-        settings=WhisperSTTService.Settings(
-            model="base",  # Changed back to base for speed - small was too slow
-            language="en"
+    # Using "tiny" model for faster processing on CPU
+    # Environment variables for offline mode are set at module level
+    logger.info("Using offline mode with cached Whisper models (set at module level)")
+    
+    try:
+        stt = WhisperSTTService(
+            settings=WhisperSTTService.Settings(
+                model="tiny",  # Using tiny model for much faster CPU processing (was "base")
+                language="en"
+            )
         )
-    )
-    logger.info("Whisper STT service initialized with base model for speed")
+        logger.info("Whisper STT service initialized with tiny model from cache")
+    except Exception as e:
+        logger.error(f"Failed to initialize Whisper with small model: {e}")
+        raise
 
 
     # Initialize LangGraph planner for tool execution
@@ -878,13 +1014,24 @@ def create_voice_agent_pipeline(transport, user_sub: str = None, sleep_state_cal
 
 
     # Get dynamic skills prompts
-    skills_prompts = get_skill_prompts()
+    skills_prompts = get_skill_prompts(user_sub=user_sub)
     logger.info(f"Loaded skills context with {len(skills_prompts)} characters")
+    
+    # Get all skills with installation status for the LLM to know about unavailable skills
+    from app.skills import get_all_skills_with_status
+    skills_status = get_all_skills_with_status(user_sub=user_sub)
+    
+    # Format skills status for system prompt
+    installed_skills = [name for name, installed in skills_status.items() if installed]
+    available_skills = [name for name, installed in skills_status.items() if not installed]
+    
+    skills_status_text = f"INSTALLED SKILLS: {', '.join(installed_skills) if installed_skills else 'None'}\n"
+    skills_status_text += f"AVAILABLE BUT NOT INSTALLED: {', '.join(available_skills) if available_skills else 'None'}"
 
     # Load system prompt (try full prompt first, fallback to simplified)
     try:
         with open("app/prompts/system_prompt_backup.txt", "r") as f:
-            system_prompt = f.read().format(current_date=current_date, current_day=current_day, skills_prompts=skills_prompts)
+            system_prompt = f.read().format(current_date=current_date, current_day=current_day, skills_prompts=skills_prompts, skills_status=skills_status_text)
         logger.info("Using full system prompt")
     except Exception as e:
         logger.warning(f"Could not load full prompt: {e}, using fallback")
@@ -901,20 +1048,20 @@ def create_voice_agent_pipeline(transport, user_sub: str = None, sleep_state_cal
         api_key=groq_api_key,
         base_url="https://api.groq.com/openai/v1",
         settings=OpenAILLMService.Settings(
-            model="llama-3.3-70b-versatile",  # Use Groq's Llama 3.3 70B model
+            model="openai/gpt-oss-120b",  # Use Groq's GPT OSS 120B model (replacement for discontinued Llama 3.3 70B)
             temperature=0,
             system_instruction=system_prompt,
         ),
     )
-    logger.info("Groq LLM service initialized with Llama 3.3 70B")
+    logger.info("Groq LLM service initialized with rate limit awareness")
     
     # Initialize TTS service (Piper - open source)
     tts = PiperTTSService(
         settings=PiperTTSService.Settings(
-            voice="en_US-lessac-medium",
+            voice="en_US-lessac-low",  # Using low quality for faster TTS generation (same voice as medium, just faster)
         )
     )
-    logger.info("Piper TTS service initialized")
+    logger.info("Piper TTS service initialized with lessac-low voice for faster generation")
     
     # Create conversation context
     context = LLMContext()
@@ -924,7 +1071,10 @@ def create_voice_agent_pipeline(transport, user_sub: str = None, sleep_state_cal
         user_params=LLMUserAggregatorParams(
             vad_analyzer=SileroVADAnalyzer(
                 params=VADParams(
-                    stop_secs=0.4,  # Wait 0.8 seconds of silence before considering user finished (prevents premature triggers on natural pauses)
+                    confidence=0.6,  # Slightly lower confidence (default 0.7) to be more responsive to quiet speech
+                    start_secs=0.2,  # Quick speech detection (default)
+                    stop_secs=0.4,  # Balanced: 0.4s wait for silence (faster than old 0.6s, but won't interrupt breathing pauses like 0.2s might)
+                    min_volume=0.5,  # Slightly lower volume threshold (default 0.6) to catch quiet speech
                 ),
             ),
             # Disable filter_incomplete_user_turns to prevent Smart Turn from sending extra API calls for incomplete detection
@@ -935,11 +1085,11 @@ def create_voice_agent_pipeline(transport, user_sub: str = None, sleep_state_cal
 
      # Create wake word processor for sleep/wake functionality
     wake_word_processor = WakeWordProcessor(sleep_state_callback=sleep_state_callback)
-    tool_executor = ToolExecutionProcessor(planner, context, llm, wake_word_processor)
+    skill_executor = SkillExecutionProcessor(planner, context, llm, wake_word_processor, user_sub=user_sub)
 
 
    # Build the pipeline with ConversationLogger and ToolExecutionProcessor
-    conversation_logger = ConversationLogger(tool_executor=tool_executor, wake_word_processor=wake_word_processor)
+    conversation_logger = ConversationLogger(skill_executor=skill_executor, wake_word_processor=wake_word_processor)
     
    
     pipeline = Pipeline(
@@ -947,7 +1097,7 @@ def create_voice_agent_pipeline(transport, user_sub: str = None, sleep_state_cal
         transport.input(),  # Transport user input
         stt,  # STT
         wake_word_processor,  # Check for wake word when sleeping AND intercept sleep/wake commands
-        tool_executor,  # Execute tools via LangGraph (intercept transcriptions)
+        skill_executor,  # Execute skills via LangGraph (intercept transcriptions)
         user_aggregator,  # User responses (handles VAD internally)
         llm,  # LLM
         tts,  # TTS

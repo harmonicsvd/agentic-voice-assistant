@@ -320,27 +320,32 @@ export const VoiceSessionCard = ({ userSub: _userSub, client, sleepStatus }: Voi
   };
 
   return (
-    <div style={{
-      display: 'flex',
-      flexDirection: 'column',
-      alignItems: 'center',
-      justifyContent: 'center',
-      gap: '32px',
-      width: '100%',
-      maxWidth: '600px',
-    }}>
+    <div 
+      className="voice-assistant-container"
+      style={{
+        display: 'flex',
+        flexDirection: 'column',
+        alignItems: 'center',
+        justifyContent: 'center',
+        gap: '32px',
+        width: '100%',
+        maxWidth: '600px',
+      }}>
       {/* Emoji Character */}
       <div className="lottie-character" style={{width: '100%', height: '280px'}}>
         <VoiceEmoji state={jerryState} />
       </div>
 
       {/* Status Text */}
-      <p style={{
-        fontSize: '1.25rem',
-        color: '#64748B',
-        textAlign: 'center',
-        minHeight: '24px',
-      }}>
+      <p 
+        className="wake-word-status"
+        style={{
+          fontSize: '1.25rem',
+          color: '#64748B',
+          textAlign: 'center',
+          minHeight: '24px',
+        }}
+      >
         {status || (jerryState === 'error' ? 'Error' : '')}
       </p>
 

@@ -1,6 +1,8 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Upload, FileText, CheckCircle, AlertCircle, Loader2, ArrowLeft, Trash2 } from 'lucide-react';
+import { ResponsiveNav } from '../components/ResponsiveNav';
+import { SideNav } from '../components/SideNav';
 
 export const Documents = () => {
   const navigate = useNavigate();
@@ -9,6 +11,7 @@ export const Documents = () => {
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [isDesktop, setIsDesktop] = useState(false);
   const [uploadedFiles, setUploadedFiles] = useState<Array<{
     document_id: string;
     filename: string;
@@ -20,6 +23,17 @@ export const Documents = () => {
   useEffect(() => {
     checkAuth();
     loadDocuments();
+  }, []);
+
+  // Detect desktop vs mobile for content layout adjustment
+  useEffect(() => {
+    const checkDesktop = () => {
+      setIsDesktop(window.innerWidth >= 768);
+    };
+
+    checkDesktop();
+    window.addEventListener('resize', checkDesktop);
+    return () => window.removeEventListener('resize', checkDesktop);
   }, []);
 
   const checkAuth = async () => {
@@ -115,34 +129,10 @@ export const Documents = () => {
   };
 
   return (
-    <main className="page">
-      <div className="brandbar">
-        <div className="brand-copy">
-          <div className="brand-name">Ram - Sham</div>
-          <div className="brand-tag">Personal Work Assistant</div>
-        </div>
-        <div className="brand-actions">
-          <button className="nav-btn" type="button" onClick={() => navigate('/assistant')}>
-            Assistant
-          </button>
-          <button className="nav-btn" type="button" onClick={() => navigate('/profile')}>
-            Profile
-          </button>
-          <button className="logout-btn" type="button" onClick={async () => {
-            try {
-              await fetch('/auth/logout', {
-                method: 'POST',
-                credentials: 'include'
-              });
-            } finally {
-              window.location.href = '/login';
-            }
-          }}>
-            Logout
-          </button>
-        </div>
-      </div>
-      <div className="max-w-7xl mx-auto px-8 py-10">
+    <main className="page" style={{ position: 'relative', minHeight: '100vh', paddingBottom: '120px' }}>
+      {/* Side Navigation */}
+      <SideNav />
+      <div className="max-w-7xl mx-auto px-8 py-10" style={{ marginLeft: isDesktop ? '80px' : '0' }}>
         <button
           onClick={() => navigate('/assistant')}
           className="mb-8 px-4 py-2.5 bg-white/60 hover:bg-white/80 text-[var(--text-main)] rounded-lg transition-all duration-300 flex items-center gap-2 font-medium border border-[var(--line)]"
@@ -284,6 +274,9 @@ export const Documents = () => {
           </div>
         </div>
       </div>
+
+      {/* Responsive Navigation */}
+      <ResponsiveNav />
     </main>
   );
 };

@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
-import { Home, User, FileText, Wrench, LogOut } from 'lucide-react';
+import { Home, User, LogOut } from 'lucide-react';
 
 interface NavItem {
   id: string;
@@ -33,18 +33,6 @@ export const ResponsiveNav = () => {
       path: '/profile',
     },
     {
-      id: 'documents',
-      label: 'Documents',
-      icon: <FileText size={20} />,
-      path: '/documents',
-    },
-    {
-      id: 'tools',
-      label: 'Tools',
-      icon: <Wrench size={20} />,
-      path: '/tools', // Different path when tools page exists
-    },
-    {
       id: 'logout',
       label: 'Logout',
       icon: <LogOut size={20} />,
@@ -56,11 +44,6 @@ export const ResponsiveNav = () => {
   // Check if current path matches nav item (more specific matching)
   const isActive = (item: NavItem) => {
     if (item.action === 'logout') return false;
-    
-    // For assistant page, only highlight Home, not Tools
-    if (location.pathname === '/assistant') {
-      return item.id === 'home';
-    }
     
     return location.pathname === item.path;
   };
@@ -79,12 +62,7 @@ export const ResponsiveNav = () => {
         navigate('/login');
       }
     } else {
-      // For now, Tools goes to assistant until tools page exists
-      if (item.id === 'tools') {
-        navigate('/assistant'); // Or show a "coming soon" message
-      } else {
-        navigate(item.path);
-      }
+      navigate(item.path);
     }
   };
 
@@ -107,7 +85,7 @@ export const ResponsiveNav = () => {
     const itemCenterX = itemIndex * (itemWidth + gap) + itemWidth / 2;
     
     const distance = Math.abs(mousePosition.x - itemCenterX);
-    const maxDistance = 140;
+    const maxDistance = 100; // Reduced since we have fewer items
     
     // Smooth proximity function
     const proximity = Math.max(0, 1 - distance / maxDistance);
@@ -129,35 +107,30 @@ export const ResponsiveNav = () => {
   // Desktop/Tablet - Text-based Navigation with EMO typography
   if (!isMobile) {
     return (
-      <motion.div
-        ref={dockRef}
-        initial={{ opacity: 0, scale: 0.8, y: 20 }}
-        animate={{ opacity: 1, scale: 1, y: 0 }}
-        transition={{ 
-          type: "spring",
-          stiffness: 300,
-          damping: 25,
-          delay: 0.2
-        }}
-        onMouseMove={handleMouseMove}
-        onMouseLeave={() => setMousePosition({ x: 0, y: 0 })}
-        style={{
-          position: 'fixed',
-          left: '35%',
-          bottom: '24px',
-          transform: 'translateX(-50%)', // Use CSS for centering, not Framer Motion
-          background: 'rgba(255, 255, 255, 0.25)',
-          backdropFilter: 'blur(8px)',
-          border: '1px solid rgba(255, 255, 255, 0.2)',
-          borderRadius: '24px',
-          boxShadow: '0 8px 32px rgba(20, 33, 61, 0.06)',
-          display: 'inline-flex',
-          gap: '12px',
-          padding: '12px 20px',
-          zIndex: 1000,
-          width: 'max-content',
-        }}
-      >
+      <div style={{ position: 'fixed', left: '0', right: '0', bottom: '24px', display: 'flex', justifyContent: 'center', marginRight:'-88px', zIndex: 1000 }}>
+        <motion.div
+          ref={dockRef}
+          initial={{ opacity: 0, scale: 0.8, y: 20 }}
+          animate={{ opacity: 1, scale: 1, y: 0 }}
+          transition={{ 
+            type: "spring",
+            stiffness: 300,
+            damping: 25,
+            delay: 0.2
+          }}
+          onMouseMove={handleMouseMove}
+          onMouseLeave={() => setMousePosition({ x: 0, y: 0 })}
+          style={{
+            background: 'rgba(255, 255, 255, 0.25)',
+            backdropFilter: 'blur(8px)',
+            border: '1px solid rgba(255, 255, 255, 0.2)',
+            borderRadius: '24px',
+            boxShadow: '0 8px 32px rgba(20, 33, 61, 0.06)',
+            display: 'flex',
+            gap: '12px',
+            padding: '12px 20px',
+          }}
+        >
 
         {navItems.map((item, index) => {
           const scale = calculateScale(index);
@@ -166,11 +139,12 @@ export const ResponsiveNav = () => {
             <motion.button
               key={item.id}
               onClick={() => handleNavClick(item)}
+              className={item.id === 'profile' ? 'profile-button' : ''}
               style={{
                 padding: '10px 20px',
                 borderRadius: '16px',
                 border: 'none',
-                background: isActive(item) 
+                background: isActive(item)
                   ? 'rgba(14, 165, 233, 0.12)'
                   : 'transparent',
                 color: isActive(item) ? '#0ea5e9' : '#14213D',
@@ -200,42 +174,41 @@ export const ResponsiveNav = () => {
             </motion.button>
           );
         })}
-      </motion.div>
+        </motion.div>
+      </div>
     );
   }
 
   // Mobile - Icon-based Navigation with EMO styling
   return (
-    <motion.div
-      initial={{ opacity: 0, scale: 0.8, y: 20 }}
-      animate={{ opacity: 1, scale: 1, y: 0 }}
-      transition={{ 
-        type: "spring",
-        stiffness: 300,
-        damping: 25,
-        delay: 0.2
-      }}
-      style={{
-        position: 'fixed',
-        bottom: '16px',
-        left: '16px',
-        right: '16px',
-        background: 'rgba(255, 255, 255, 0.35)',
-        backdropFilter: 'blur(8px)',
-        border: '1px solid rgba(255, 255, 255, 0.2)',
-        borderRadius: '20px',
-        boxShadow: '0 8px 32px rgba(20, 33, 61, 0.06)',
-        display: 'flex',
-        justifyContent: 'space-around',
-        padding: '10px 12px',
-        paddingBottom: 'max(10px, env(safe-area-inset-bottom) + 10px)',
-        zIndex: 1000,
-      }}
-    >
+    <div style={{ position: 'fixed', left: '0', right: '0', bottom: '16px', display: 'flex', justifyContent: 'center', zIndex: 1000 }}>
+      <motion.div
+        initial={{ opacity: 0, scale: 0.8, y: 20 }}
+        animate={{ opacity: 1, scale: 1, y: 0 }}
+        transition={{ 
+          type: "spring",
+          stiffness: 300,
+          damping: 25,
+          delay: 0.2
+        }}
+        style={{
+          background: 'rgba(255, 255, 255, 0.35)',
+          backdropFilter: 'blur(8px)',
+          border: '1px solid rgba(255, 255, 255, 0.2)',
+          borderRadius: '20px',
+          boxShadow: '0 8px 32px rgba(20, 33, 61, 0.06)',
+          display: 'flex',
+          justifyContent: 'space-around',
+          padding: '10px 12px',
+          paddingBottom: 'max(10px, env(safe-area-inset-bottom) + 10px)',
+          margin: '0 16px',
+        }}
+      >
       {navItems.map((item) => (
         <motion.button
           key={item.id}
           onClick={() => handleNavClick(item)}
+          className={item.id === 'profile' ? 'profile-button' : ''}
           whileTap={{ scale: 0.9 }}
           style={{
             display: 'flex',
@@ -281,6 +254,7 @@ export const ResponsiveNav = () => {
           )}
         </motion.button>
       ))}
-    </motion.div>
+      </motion.div>
+    </div>
   );
 };

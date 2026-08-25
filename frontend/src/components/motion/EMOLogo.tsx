@@ -172,7 +172,7 @@ export const EMOLogo = ({ onColorChange, compact = false }: { onColorChange?: (c
         }}
       >
         {/* E with label */}
-        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center',marginRight: compact ? '20px' : '0' }}>
+        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center',marginRight: compact ? '0px' : '0' }}>
           <motion.span variants={eVariants}>E</motion.span>
           <motion.span 
             variants={eLabelVariants}
