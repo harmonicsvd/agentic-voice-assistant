@@ -732,9 +732,9 @@ async def auth_google_callback(request: Request):
             logger.warning(f"OAuth callback - no refresh_token returned by Google. Token keys: {list(token.keys())}")
         
         destination = "/assistant" if _is_profile_complete(_get_profile_row(user_sub)) else "/setup"
-        # Redirect to React dev server for development
-        react_url = getattr(settings, 'react_dev_url', 'http://localhost:5173')
-        return RedirectResponse(url=f"{react_url}{destination}?user_sub={user_sub}", status_code=302)
+        # Redirect to frontend URL (use environment variable in production, localhost for dev)
+        frontend_url = os.getenv("FRONTEND_URL", "http://localhost:5173")
+        return RedirectResponse(url=f"{frontend_url}{destination}?user_sub={user_sub}", status_code=302)
     except Exception as e:
         logger.error(f"OAuth callback error: {e}")
         return JSONResponse({"error": f"OAuth callback failed: {str(e)}"}, status_code=500)
