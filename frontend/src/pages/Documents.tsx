@@ -54,10 +54,10 @@ export const Documents = () => {
 
   const loadDocuments = async () => {
     try {
-      const response = await fetch('/internal/knowledge/list', { 
+      const response = await fetch('/internal/knowledge/list', {
         credentials: 'same-origin',
         headers: {
-          'X-Internal-API-Key': import.meta.env.VITE_WEATHER_AGENT_INTERNAL_API_KEY || ''
+          'X-Internal-API-Key': import.meta.env.VITE_BACKEND_AGENT_INTERNAL_API_KEY || ''
         }
       });
       if (response.ok) {
@@ -95,12 +95,12 @@ export const Documents = () => {
       formData.append('user_sub', userSub);
 
       const response = await fetch(
-        `${import.meta.env.VITE_WEATHER_AGENT_URL || 'http://127.0.0.1:9000'}/internal/knowledge/upload`,
+        `${import.meta.env.VITE_BACKEND_AGENT_URL || 'http://127.0.0.1:9000'}/internal/knowledge/upload`,
         {
           method: 'POST',
           credentials: 'same-origin',
           headers: {
-            'X-Internal-API-Key': import.meta.env.VITE_WEATHER_AGENT_INTERNAL_API_KEY || ''
+            'X-Internal-API-Key': import.meta.env.VITE_BACKEND_AGENT_INTERNAL_API_KEY || ''
           },
           body: formData
         }

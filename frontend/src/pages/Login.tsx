@@ -8,8 +8,9 @@ export const Login = () => {
   const [accentColor, setAccentColor] = useState('#BFD7FF');
 
   const handleLogin = () => {
-    // Call actual Google OAuth endpoint - proxied through Vite
-    window.location.href = '/auth/google/login';
+    // Call actual Google OAuth endpoint on Voice Agent backend
+    const voiceAgentUrl = import.meta.env.VITE_VOICE_AGENT_URL || 'http://127.0.0.1:8000';
+    window.location.href = `${voiceAgentUrl}/auth/google/login`;
   };
 
   const handleColorChange = (color: string) => {
