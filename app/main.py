@@ -88,8 +88,9 @@ app.add_middleware(
 app.add_middleware(
     SessionMiddleware,
     secret_key=settings.app_secret_key,
-    same_site="none",  # Required for cross-origin cookies
-    https_only=True,   # Required when same_site=none
+    same_site="lax",  # Changed back to lax for better compatibility
+    https_only=True,   # Required for production
+    max_age=None,  # Session cookie (expires when browser closes)
 )
 
 
