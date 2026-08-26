@@ -21,6 +21,8 @@ class Settings:
     app_secret_key: str = os.getenv("APP_SECRET_KEY", "dev-secret")
     # OpenAI API key for Whisper STT and other OpenAI services.
     openai_api_key: str = os.getenv("OPENAI_API_KEY", "")
+    # Environment: 'production' for cloud, 'development' for local
+    environment: str = os.getenv("ENVIRONMENT", "development")
     # Internal backend-to-backend auth key (Sham <-> Ram).
     internal_api_key: str = os.getenv("INTERNAL_API_KEY", "")
     # Backend Agent connection used by Ram summary and upload endpoints.

@@ -19,6 +19,7 @@ if os.getenv("HF_TOKEN"):
 
 from pipecat.services.openai.llm import OpenAILLMService
 from pipecat.services.openai.stt import OpenAISTTService
+from pipecat.services.whisper.stt import WhisperSTTService
 from pipecat.services.piper.tts import PiperTTSService
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.worker import PipelineWorker
@@ -992,19 +993,35 @@ def create_voice_agent_pipeline(transport, user_sub: str = None, sleep_state_cal
     if not groq_api_key:
         raise ValueError("GROQ_API_KEY environment variable is required but not set. Please get your API key from https://console.groq.com/keys and add it to your .env file.")
 
-    # Initialize STT service (OpenAI Whisper API)
-    # Using cloud-based STT to avoid Render 512MB memory limit
-    logger.info("Using OpenAI Whisper API for STT (cloud-based to avoid memory issues)")
+    # Initialize STT service based on environment
+    # Production: OpenAI Whisper API (cloud-based, no memory issues)
+    # Development: Local Whisper model (faster, no API costs)
+    is_production = settings.environment == "production"
     
-    try:
-        stt = OpenAISTTService(
-            api_key=settings.openai_api_key,
-            model="whisper-1"
-        )
-        logger.info("OpenAI STT service initialized with whisper-1 model")
-    except Exception as e:
-        logger.error(f"Failed to initialize OpenAI STT: {e}")
-        raise
+    if is_production:
+        logger.info("Using OpenAI Whisper API for STT (production mode)")
+        try:
+            stt = OpenAISTTService(
+                api_key=settings.openai_api_key,
+                model="whisper-1"
+            )
+            logger.info("OpenAI STT service initialized with whisper-1 model")
+        except Exception as e:
+            logger.error(f"Failed to initialize OpenAI STT: {e}")
+            raise
+    else:
+        logger.info("Using local Whisper model for STT (development mode)")
+        try:
+            stt = WhisperSTTService(
+                settings=WhisperSTTService.Settings(
+                    model="tiny",  # Using tiny model for faster CPU processing
+                    language="en"
+                )
+            )
+            logger.info("Local Whisper STT service initialized with tiny model")
+        except Exception as e:
+            logger.error(f"Failed to initialize local Whisper STT: {e}")
+            raise
 
 
     # Initialize LangGraph planner for tool execution
