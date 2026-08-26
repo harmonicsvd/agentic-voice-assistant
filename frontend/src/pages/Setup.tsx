@@ -27,14 +27,33 @@ export const Setup = () => {
   });
 
   useEffect(() => {
+    // Extract token from URL if present
+    const urlParams = new URLSearchParams(window.location.search);
+    const token = urlParams.get('token');
+    if (token) {
+      localStorage.setItem('auth_token', token);
+      // Clean URL
+      window.history.replaceState({}, '', window.location.pathname);
+    }
+    
     checkAuth();
     loadProfile();
   }, []);
 
+  const getAuthHeaders = () => {
+    const token = localStorage.getItem('auth_token');
+    const headers: Record<string, string> = {};
+    if (token) {
+      headers['Authorization'] = `Bearer ${token}`;
+    }
+    return headers;
+  };
+
   const checkAuth = async () => {
     try {
       const voiceAgentUrl = import.meta.env.VITE_VOICE_AGENT_URL || '';
-      const res = await fetch(`${voiceAgentUrl}/auth/me`, { credentials: 'include' });
+      const headers = getAuthHeaders();
+      const res = await fetch(`${voiceAgentUrl}/auth/me`, { headers });
       if (res.status !== 200) {
         navigate('/login');
       }
@@ -47,7 +66,8 @@ export const Setup = () => {
   const loadProfile = async () => {
     try {
       const voiceAgentUrl = import.meta.env.VITE_VOICE_AGENT_URL || '';
-      const response = await fetch(`${voiceAgentUrl}/api/profile`, { credentials: 'same-origin' });
+      const headers = getAuthHeaders();
+      const response = await fetch(`${voiceAgentUrl}/api/profile`, { headers });
       if (!response.ok) return;
       const payload = await response.json();
       const profile = payload.profile || {};
@@ -117,10 +137,13 @@ export const Setup = () => {
 
     try {
       const voiceAgentUrl = import.meta.env.VITE_VOICE_AGENT_URL || '';
+      const headers = {
+        ...getAuthHeaders(),
+        'Content-Type': 'application/json',
+      };
       const response = await fetch(`${voiceAgentUrl}/api/profile`, {
         method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'same-origin',
+        headers,
         body: JSON.stringify(formData),
       });
 

@@ -26,7 +26,12 @@ export const VoiceAssistant = () => {
   const fetchUser = async () => {
     try {
       const voiceAgentUrl = import.meta.env.VITE_VOICE_AGENT_URL || '';
-      const res = await fetch(`${voiceAgentUrl}/auth/me`, { credentials: 'include' });
+      const token = localStorage.getItem('auth_token');
+      const headers: Record<string, string> = {};
+      if (token) {
+        headers['Authorization'] = `Bearer ${token}`;
+      }
+      const res = await fetch(`${voiceAgentUrl}/auth/me`, { headers });
       if (res.status === 200) {
         const me = await res.json();
         const sub = me.user?.sub || '';

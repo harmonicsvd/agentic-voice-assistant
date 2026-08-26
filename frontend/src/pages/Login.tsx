@@ -1,11 +1,25 @@
 import { motion, Easing } from 'framer-motion';
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { AnimatedBackground } from '../components/motion/AnimatedBackground';
 import { EMOLogo } from '../components/motion/EMOLogo';
 import { MotionButton } from '../components/motion/MotionButton';
 
 export const Login = () => {
   const [accentColor, setAccentColor] = useState('#BFD7FF');
+  const navigate = useNavigate();
+
+  useEffect(() => {
+    // Check if token is in URL (from OAuth callback)
+    const urlParams = new URLSearchParams(window.location.search);
+    const token = urlParams.get('token');
+    if (token) {
+      localStorage.setItem('auth_token', token);
+      // Clean URL and redirect to assistant
+      window.history.replaceState({}, '', window.location.pathname);
+      navigate('/assistant');
+    }
+  }, [navigate]);
 
   const handleLogin = () => {
     // Call actual Google OAuth endpoint on Voice Agent backend
