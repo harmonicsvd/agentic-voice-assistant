@@ -10,10 +10,9 @@ import logging
 import asyncio
 import difflib
 
-# Set environment variables for offline model loading BEFORE importing Pipecat
+# Set environment variables for model loading BEFORE importing Pipecat
 os.environ["HF_HOME"] = os.path.expanduser("~/.cache/huggingface")
-os.environ["HF_HUB_OFFLINE"] = "1"
-os.environ["TRANSFORMERS_OFFLINE"] = "1"
+# Removed HF_HUB_OFFLINE and TRANSFORMERS_OFFLINE to allow model downloads on Render
 
 from pipecat.services.openai.llm import OpenAILLMService
 from pipecat.services.whisper.stt import WhisperSTTService
