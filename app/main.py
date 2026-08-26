@@ -735,7 +735,15 @@ async def auth_google_callback(request: Request):
 
         user_sub = user_info.get("sub", "")
         
-        # Create JWT token for frontend
+        # Store user in session for local development (same-origin)
+        request.session["user"] = {
+            "sub": user_sub,
+            "email": user_info.get("email"),
+            "name": user_info.get("name"),
+            "picture": user_info.get("picture"),
+        }
+        
+        # Create JWT token for frontend (for production cross-origin)
         jwt_token = create_jwt_token({
             "sub": user_sub,
             "email": user_info.get("email"),
