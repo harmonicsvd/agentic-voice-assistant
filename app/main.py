@@ -88,8 +88,8 @@ app.add_middleware(
 app.add_middleware(
     SessionMiddleware,
     secret_key=settings.app_secret_key,
-    same_site="lax",
-    https_only=False,  # local dev
+    same_site="none",  # Required for cross-origin cookies
+    https_only=True,   # Required when same_site=none
 )
 
 
