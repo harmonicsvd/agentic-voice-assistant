@@ -73,6 +73,7 @@ logger = logging.getLogger("uvicorn.error")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
+        "https://emo-personal-agentic-voice-assistan.vercel.app",
         "https://voice-scheduling-agent-pi.vercel.app",
         "http://localhost:3000",
         "http://127.0.0.1:5500",
