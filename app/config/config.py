@@ -19,6 +19,8 @@ class Settings:
     google_oauth_client_id: str = os.getenv("GOOGLE_OAUTH_CLIENT_ID", "")
     google_oauth_client_secret: str = os.getenv("GOOGLE_OAUTH_CLIENT_SECRET", "")
     app_secret_key: str = os.getenv("APP_SECRET_KEY", "dev-secret")
+    # OpenAI API key for Whisper STT and other OpenAI services.
+    openai_api_key: str = os.getenv("OPENAI_API_KEY", "")
     # Internal backend-to-backend auth key (Sham <-> Ram).
     internal_api_key: str = os.getenv("INTERNAL_API_KEY", "")
     # Backend Agent connection used by Ram summary and upload endpoints.
