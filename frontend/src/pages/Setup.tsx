@@ -27,12 +27,19 @@ export const Setup = () => {
   });
 
   useEffect(() => {
-    // Extract token from URL if present
+    // Check if token is in URL (from OAuth callback) - only for production
     const urlParams = new URLSearchParams(window.location.search);
     const token = urlParams.get('token');
-    if (token) {
+    const voiceAgentUrl = import.meta.env.VITE_VOICE_AGENT_URL || '';
+    const isLocal = voiceAgentUrl.includes('localhost') || voiceAgentUrl.includes('127.0.0.1');
+    
+    if (token && !isLocal) {
+      // Production: store JWT token
       localStorage.setItem('auth_token', token);
       // Clean URL
+      window.history.replaceState({}, '', window.location.pathname);
+    } else if (isLocal) {
+      // Local development: clean URL, rely on session cookies
       window.history.replaceState({}, '', window.location.pathname);
     }
     
