@@ -15,8 +15,6 @@ langchain-core
 langchain-openai
 langchain-community
 pipecat-ai
-faster-whisper
-mlx-whisper
 piper-tts
 numpy
 PyJWT

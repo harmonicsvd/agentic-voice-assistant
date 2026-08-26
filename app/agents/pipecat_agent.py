@@ -18,7 +18,7 @@ if os.getenv("HF_TOKEN"):
 # Removed HF_HUB_OFFLINE and TRANSFORMERS_OFFLINE to allow model downloads on Render
 
 from pipecat.services.openai.llm import OpenAILLMService
-from pipecat.services.whisper.stt import WhisperSTTService
+from pipecat.services.openai.stt import OpenAISTTService
 from pipecat.services.piper.tts import PiperTTSService
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.worker import PipelineWorker
@@ -991,21 +991,18 @@ def create_voice_agent_pipeline(transport, user_sub: str = None, sleep_state_cal
     if not groq_api_key:
         raise ValueError("GROQ_API_KEY environment variable is required but not set. Please get your API key from https://console.groq.com/keys and add it to your .env file.")
 
-    # Initialize STT service (Whisper)
-    # Using "tiny" model for faster processing on CPU
-    # Environment variables for offline mode are set at module level
-    logger.info("Using offline mode with cached Whisper models (set at module level)")
+    # Initialize STT service (OpenAI Whisper API)
+    # Using cloud-based STT to avoid Render 512MB memory limit
+    logger.info("Using OpenAI Whisper API for STT (cloud-based to avoid memory issues)")
     
     try:
-        stt = WhisperSTTService(
-            settings=WhisperSTTService.Settings(
-                model="tiny",  # Using tiny model for much faster CPU processing (was "base")
-                language="en"
-            )
+        stt = OpenAISTTService(
+            api_key=settings.openai_api_key,
+            model="whisper-1"
         )
-        logger.info("Whisper STT service initialized with tiny model from cache")
+        logger.info("OpenAI STT service initialized with whisper-1 model")
     except Exception as e:
-        logger.error(f"Failed to initialize Whisper with small model: {e}")
+        logger.error(f"Failed to initialize OpenAI STT: {e}")
         raise
 
 
