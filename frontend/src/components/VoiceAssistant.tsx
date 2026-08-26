@@ -26,12 +26,28 @@ export const VoiceAssistant = () => {
   const fetchUser = async () => {
     try {
       const voiceAgentUrl = import.meta.env.VITE_VOICE_AGENT_URL || '';
-      const token = localStorage.getItem('auth_token');
+      // Detect if running locally (same-origin) vs production (cross-origin)
+      const isLocal = voiceAgentUrl.includes('localhost') || voiceAgentUrl.includes('127.0.0.1');
+      
       const headers: Record<string, string> = {};
-      if (token) {
-        headers['Authorization'] = `Bearer ${token}`;
+      const fetchOptions: RequestInit = {};
+      
+      if (isLocal) {
+        // Local development: use session cookies
+        fetchOptions.credentials = 'include';
+      } else {
+        // Production: use JWT token
+        const token = localStorage.getItem('auth_token');
+        if (token) {
+          headers['Authorization'] = `Bearer ${token}`;
+        }
       }
-      const res = await fetch(`${voiceAgentUrl}/auth/me`, { headers });
+      
+      if (Object.keys(headers).length > 0) {
+        fetchOptions.headers = headers;
+      }
+      
+      const res = await fetch(`${voiceAgentUrl}/auth/me`, fetchOptions);
       if (res.status === 200) {
         const me = await res.json();
         const sub = me.user?.sub || '';

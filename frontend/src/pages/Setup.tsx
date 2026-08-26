@@ -40,20 +40,36 @@ export const Setup = () => {
     loadProfile();
   }, []);
 
-  const getAuthHeaders = () => {
-    const token = localStorage.getItem('auth_token');
+  const getAuthConfig = () => {
+    const voiceAgentUrl = import.meta.env.VITE_VOICE_AGENT_URL || '';
+    const isLocal = voiceAgentUrl.includes('localhost') || voiceAgentUrl.includes('127.0.0.1');
+    
     const headers: Record<string, string> = {};
-    if (token) {
-      headers['Authorization'] = `Bearer ${token}`;
+    const fetchOptions: RequestInit = {};
+    
+    if (isLocal) {
+      // Local development: use session cookies
+      fetchOptions.credentials = 'include';
+    } else {
+      // Production: use JWT token
+      const token = localStorage.getItem('auth_token');
+      if (token) {
+        headers['Authorization'] = `Bearer ${token}`;
+      }
     }
-    return headers;
+    
+    if (Object.keys(headers).length > 0) {
+      fetchOptions.headers = headers;
+    }
+    
+    return fetchOptions;
   };
 
   const checkAuth = async () => {
     try {
       const voiceAgentUrl = import.meta.env.VITE_VOICE_AGENT_URL || '';
-      const headers = getAuthHeaders();
-      const res = await fetch(`${voiceAgentUrl}/auth/me`, { headers });
+      const fetchOptions = getAuthConfig();
+      const res = await fetch(`${voiceAgentUrl}/auth/me`, fetchOptions);
       if (res.status !== 200) {
         navigate('/login');
       }
@@ -66,8 +82,8 @@ export const Setup = () => {
   const loadProfile = async () => {
     try {
       const voiceAgentUrl = import.meta.env.VITE_VOICE_AGENT_URL || '';
-      const headers = getAuthHeaders();
-      const response = await fetch(`${voiceAgentUrl}/api/profile`, { headers });
+      const fetchOptions = getAuthConfig();
+      const response = await fetch(`${voiceAgentUrl}/api/profile`, fetchOptions);
       if (!response.ok) return;
       const payload = await response.json();
       const profile = payload.profile || {};
@@ -137,13 +153,14 @@ export const Setup = () => {
 
     try {
       const voiceAgentUrl = import.meta.env.VITE_VOICE_AGENT_URL || '';
-      const headers = {
-        ...getAuthHeaders(),
+      const fetchOptions = getAuthConfig();
+      fetchOptions.headers = {
+        ...fetchOptions.headers,
         'Content-Type': 'application/json',
       };
       const response = await fetch(`${voiceAgentUrl}/api/profile`, {
         method: 'PUT',
-        headers,
+        ...fetchOptions,
         body: JSON.stringify(formData),
       });
 
