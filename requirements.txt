@@ -19,5 +19,6 @@ faster-whisper
 mlx-whisper
 piper-tts
 numpy
+PyJWT
 
 starlette
