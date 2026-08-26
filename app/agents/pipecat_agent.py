@@ -12,6 +12,9 @@ import difflib
 
 # Set environment variables for model loading BEFORE importing Pipecat
 os.environ["HF_HOME"] = os.path.expanduser("~/.cache/huggingface")
+# Use HF_TOKEN if available for faster downloads
+if os.getenv("HF_TOKEN"):
+    os.environ["HF_TOKEN"] = os.getenv("HF_TOKEN")
 # Removed HF_HUB_OFFLINE and TRANSFORMERS_OFFLINE to allow model downloads on Render
 
 from pipecat.services.openai.llm import OpenAILLMService
