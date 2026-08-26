@@ -29,6 +29,7 @@ from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.audio.vad.vad_analyzer import VADParams
 from app.skills import get_skill_prompts, get_all_skills
 from app.graph.skill_config import get_formatted_context
+from app.config.config import settings
 from pipecat.frames.frames import (
     AudioRawFrame, TextFrame, TranscriptionFrame,
     UserStartedSpeakingFrame, UserStoppedSpeakingFrame,
