@@ -790,7 +790,13 @@ async def auth_google_callback(request: Request):
         destination = "/assistant" if _is_profile_complete(_get_profile_row(user_sub)) else "/setup"
         # Redirect to frontend URL (use environment variable in production, localhost for dev)
         frontend_url = os.getenv("FRONTEND_URL", "http://localhost:5173")
-        return RedirectResponse(url=f"{frontend_url}{destination}?token={jwt_token}", status_code=302)
+        
+        # For local development, don't include JWT token (use session cookies)
+        # For production, include JWT token for cross-origin auth
+        if settings.environment == "production":
+            return RedirectResponse(url=f"{frontend_url}{destination}?token={jwt_token}", status_code=302)
+        else:
+            return RedirectResponse(url=f"{frontend_url}{destination}", status_code=302)
     except Exception as e:
         logger.error(f"OAuth callback error: {e}")
         return JSONResponse({"error": f"OAuth callback failed: {str(e)}"}, status_code=500)
