@@ -1,6 +1,7 @@
 import os
 import sqlite3
 import logging
+from datetime import datetime, timezone
 from contextlib import contextmanager
 from app.config.config import settings
 
@@ -126,7 +127,8 @@ def init_db():
         conn.execute(knowledge_documents_ddl)
         conn.execute(skills_ddl)
         conn.execute(skill_registry_ddl)
-        
+
+        # NOTE: rag_search skill removed - RAG functionality now integrated into meeting_discussion skill
         # Add emo_avatar column if it doesn't exist (for existing databases)
         try:
             if using_postgres():

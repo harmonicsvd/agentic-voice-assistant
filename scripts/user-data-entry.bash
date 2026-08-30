@@ -2,17 +2,15 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-BASE="http://127.0.0.1:8000"   # or your Render URL
-KEY="2zAeiOr_V0dCuEt9oOC_9AEiM6q6OBcSCdtSSf-z6bjnNKulspvasyVe0_PyHPrf"
-SUB="109249496503948291720"
-DATE="2026-06-04"
+BASE="http://127.0.0.1:9000"   # Backend Agent URL
+KEY="hQq8ZcTnq7GT4_3cFZezGYk8sFSlGMM4iBrZDif5Jps"
+SUB="104659023322141767006"
+DATE="2026-08-30"
 
 post_event () {
-  local id="$1" name="$2" time="$3" title="$4" duration="$5" mode="$6" city="$7" location="$8"
+  local id="$1" time="$2" title="$3" duration="$4" mode="$5" city="$6" location="$7"
 
   payload=$(jq -n \
-    --arg id "$id" \
-    --arg name "$name" \
     --arg date "$DATE" \
     --arg time "$time" \
     --arg title "$title" \
@@ -23,28 +21,21 @@ post_event () {
     --arg location "$location" \
     '
     {
-      message: {
-        toolCalls: [{
-          id: $id,
-          function: {
-            arguments: {
-              name: $name,
-              date: $date,
-              time: $time,
-              title: $title,
-              duration: $duration,
-              meeting_mode: $mode,
-              user_sub: $sub
-            }
-          }
-        }]
-      }
+      parameters: {
+        date: $date,
+        time: $time,
+        title: $title,
+        duration: $duration,
+        meeting_mode: $mode,
+        user_sub: $sub
+      },
+      user_sub: $sub
     }
-    | if $city != "" then .message.toolCalls[0].function.arguments.city = $city else . end
-    | if $location != "" then .message.toolCalls[0].function.arguments.location = $location else . end
+    | if $city != "" then .parameters.city = $city else . end
+    | if $location != "" then .parameters.location = $location else . end
     ')
 
-  curl -sS -X POST "$BASE/create-event" \
+  curl -sS -X POST "$BASE/internal/skills/google_calendar" \
     -H "Content-Type: application/json" \
     -H "X-Internal-API-Key: $KEY" \
     -d "$payload"
@@ -52,20 +43,20 @@ post_event () {
 }
 
 
-# 1) in_person + explicit city/location
-post_event "tc1" "Varad" "09:00" "Site Survey Berlin" "45 min" "in_person" "Berlin" "Berlin Office"
+# 1) Project Kickoff Meeting - based on meeting notes
+post_event "tc1" "09:00" "Project Kickoff Meeting" "60 min" "in_person" "" "Conference Room A"
 
-# 2) in_person + explicit city/location
-post_event "tc2" "Varad" "11:00" "Client Visit Hamburg" "30 min" "in_person" "Hamburg" "Hamburg Port"
+# 2) Technical Architecture Review - John's action item
+post_event "tc2" "11:00" "Technical Architecture Finalization" "45 min" "online" "" ""
 
-# 3) in_person + no city + location only -> should use profile default city
-post_event "tc3" "Varad" "13:00" "Factory Walkthrough" "60 min" "in_person" "" "Unknown Industrial Site"
+# 3) Marketing Materials Preparation - Sarah's action item
+post_event "tc3" "14:00" "Marketing Materials Review" "30 min" "online" "" ""
 
-# 4) in_person + city only (no location)
-post_event "tc4" "Varad" "15:00" "Vendor Meeting Munich" "30 min" "in_person" "Munich" ""
+# 4) Development Environment Setup - Mike's action item
+post_event "tc4" "15:30" "Development Environment Setup" "60 min" "online" "" ""
 
-# 5) online meeting
-post_event "tc5" "Varad" "16:30" "Online Sync" "20 min" "online" "" ""
+# 5) Stakeholder Coordination - Lisa's action item
+post_event "tc5" "17:00" "Stakeholder Coordination Meeting" "45 min" "online" "" ""
 
-# 6) in_person + another city to diversify weather signal
-post_event "tc6" "Varad" "18:00" "Evening Inspection Frankfurt" "40 min" "in_person" "Frankfurt" "Frankfurt Site"
+# 6) MVP Planning - Q1 2025 timeline discussion
+post_event "tc6" "10:00" "MVP Launch Planning" "90 min" "in_person" "" "Conference Room A"

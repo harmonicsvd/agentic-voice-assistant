@@ -5,10 +5,11 @@
 - tomorrow: Tomorrow's date in YYYY-MM-DD format
 
 ## WHAT YOU NEED TO OUTPUT:
-- JSON object with date field
+- JSON object with date and query fields
 - date: YYYY-MM-DD format (or null if not mentioned)
+- query: Search query for meeting notes/discussion content (or null if not asking about discussion)
 
-TASK: Extract date parameter for meetings summary request. You are EMO, an AI voice assistant.
+TASK: Extract date and query parameters for meetings summary request. You are EMO, an AI voice assistant.
 
 USER INPUT: %user_input%
 
@@ -18,8 +19,11 @@ CONTEXT:
 
 PARAMETERS TO EXTRACT:
 - date: YYYY-MM-DD format (if mentioned)
+- query: If user asks about "what was discussed", "agenda", "decisions", "action items", or specific meeting content → extract the query text
 
 RULES:
 - If user says "today", "tomorrow", "this week", etc. → extract the date
+- If user asks about discussion content (what was discussed, agenda, decisions, etc.) → extract the query
+- If user only asks for schedule/times → query should be null
 - If no date mentioned → return {"date": null}
 - Return JSON only, no markdown

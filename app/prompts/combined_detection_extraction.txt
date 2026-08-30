@@ -55,6 +55,7 @@ PARAMETER EXTRACTION RULES FOR google_calendar:
 
 PARAMETER EXTRACTION RULES FOR meeting_discussion:
 - date: YYYY-MM-DD format to show meetings for
+- query: If user asks about any information that could be in their notes, documents, or knowledge base (meeting content, requirements, features, decisions, action items, etc.) → extract the query text for knowledge base search
 
 PARAMETER EXTRACTION RULES FOR get_weather:
 - city: city name
@@ -67,6 +68,7 @@ INTELLIGENT BEHAVIOR:
 - If there's an existing meeting in progress, assume updates unless user explicitly starts fresh
 - Detect cancellations: "cancel", "stop", "never mind", "forget it", "start fresh" → cancel_event
 - Detect general conversation: questions about advice, tips, general knowledge, personal development, hobbies, etc. → general_conversation
+- CRITICAL: Knowledge base queries (about documents, requirements, features, etc.) should use meeting_discussion with a query parameter, NOT rag_search
 - CRITICAL: Use existing parameters as base, only update what's explicitly mentioned
 - CRITICAL: If a parameter is not mentioned in the current input but exists in existing_params, PRESERVE the existing value instead of returning null
 - CRITICAL: When user confirms (says "yes", "please book it", etc.) and existing_params has incomplete data, preserve ALL existing_params and return the same tool - do NOT return "none"

@@ -283,11 +283,24 @@ async def analyze_and_extract_optimized(state: PlannerState, planning_llm) -> Pl
     # Load combined detection + extraction prompt
     from app.prompts import get_combined_detection_extraction_prompt
     
+    # OPTIMIZATION: Cache extraction results to avoid redundant LLM calls
+    # Check if we have a cached extraction result for the same user input and skill
+    extraction_cache_key = f"{active_skill or 'none'}:{user_input}"
+    if not hasattr(state, '_extraction_cache'):
+        state['_extraction_cache'] = {}
+    
     # OPTIMIZATION: If active skill is set, skip detection and only extract parameters
     if active_skill:
         logger.info(f"🚀 OPTIMIZED: Active skill '{active_skill}' detected, skipping detection, only extracting parameters")
         detected_skill = active_skill
-        extracted_params = {}
+        
+        # Check cache first
+        if extraction_cache_key in state['_extraction_cache']:
+            cached_result = state['_extraction_cache'][extraction_cache_key]
+            logger.info(f"🚀 OPTIMIZED: Using cached extraction result for '{active_skill}': {cached_result}")
+            extracted_params = cached_result
+        else:
+            extracted_params = {}
         
         # Use extraction-only prompt for active skill
         extraction_prompt = get_combined_detection_extraction_prompt(
@@ -317,41 +330,57 @@ async def analyze_and_extract_optimized(state: PlannerState, planning_llm) -> Pl
             
         if success:
             logger.info(f"🚀 OPTIMIZED: Extracted params for {active_skill}: {extracted_params}")
+            # Cache the extraction result
+            state['_extraction_cache'][extraction_cache_key] = extracted_params
+            logger.info(f"🚀 OPTIMIZED: Cached extraction result for key: {extraction_cache_key}")
         else:
             logger.warning(f"🚀 OPTIMIZED: Using fallback params for {active_skill}")
     else:
         # Full detection + extraction for new skill
-        combined_prompt = get_combined_detection_extraction_prompt(
-            user_input=user_input,
-            existing_params=existing_params,
-            current_date=current_date,
-            current_day=current_day,
-            tomorrow=tomorrow,
-            context_hint=context_hint,
-            conversation_history=state.get("conversation_history", []),
-            available_skills=tool_context['available_skills']
-        )
-        
-        logger.info(f"🚀 OPTIMIZED: Using combined detection + extraction prompt")
-        
-        
-        response = await planning_llm.ainvoke([
-                {"role": "system", "content": "You are a tool detector and parameter extractor. Return ONLY valid JSON."},
-                {"role": "user", "content": combined_prompt}
-            ])
-            
-        response_content = response.content.strip()
-        logger.info(f"🚀 OPTIMIZED: Combined LLM response={response_content}")
-            
-            # Use Pydantic validation for robust response handling
-        validated_response, success = LLMResponseValidator.validate_optimized_response(response_content)
-        detected_skill = validated_response.detected_tool or "none"
-        extracted_params = validated_response.extracted_params
-            
-        if success:
-            logger.info(f"🚀 OPTIMIZED: Detected skill={detected_skill}, extracted_params={extracted_params}")
+        # Check cache first
+        if extraction_cache_key in state['_extraction_cache']:
+            cached_result = state['_extraction_cache'][extraction_cache_key]
+            logger.info(f"🚀 OPTIMIZED: Using cached detection+extraction result: {cached_result}")
+            detected_skill = cached_result.get('detected_tool', 'none')
+            extracted_params = cached_result.get('extracted_params', {})
         else:
-            logger.warning(f"🚀 OPTIMIZED: Using fallback detection (no skill)")
+            combined_prompt = get_combined_detection_extraction_prompt(
+                user_input=user_input,
+                existing_params=existing_params,
+                current_date=current_date,
+                current_day=current_day,
+                tomorrow=tomorrow,
+                context_hint=context_hint,
+                conversation_history=state.get("conversation_history", []),
+                available_skills=tool_context['available_skills']
+            )
+            
+            logger.info(f"🚀 OPTIMIZED: Using combined detection + extraction prompt")
+            
+            
+            response = await planning_llm.ainvoke([
+                    {"role": "system", "content": "You are a tool detector and parameter extractor. Return ONLY valid JSON."},
+                    {"role": "user", "content": combined_prompt}
+                ])
+                
+            response_content = response.content.strip()
+            logger.info(f"🚀 OPTIMIZED: Combined LLM response={response_content}")
+                
+                # Use Pydantic validation for robust response handling
+            validated_response, success = LLMResponseValidator.validate_optimized_response(response_content)
+            detected_skill = validated_response.detected_tool or "none"
+            extracted_params = validated_response.extracted_params
+                
+            if success:
+                # Cache the full detection+extraction result
+                state['_extraction_cache'][extraction_cache_key] = {
+                    'detected_tool': detected_skill,
+                    'extracted_params': extracted_params
+                }
+                logger.info(f"🚀 OPTIMIZED: Cached detection+extraction result for key: {extraction_cache_key}")
+                logger.info(f"🚀 OPTIMIZED: Detected skill={detected_skill}, extracted_params={extracted_params}")
+            else:
+                logger.warning(f"🚀 OPTIMIZED: Using fallback detection (no skill)")
     
     if detected_skill == "none":
         logger.info(f"🚀 OPTIMIZED: No skill detected, keeping existing state")
@@ -1058,6 +1087,10 @@ async def create_plan(state: PlannerState, planning_llm) -> PlannerState:
             elif date_to_use:
                 # We have a date from extraction, use it
                 logger.info(f"🔍 create_plan: using extracted date: {date_to_use}")
+            elif params.get("query"):
+                # No date but query present for RAG search - use today's date (Backend Agent will skip calendar fetch)
+                logger.info(f"🔍 create_plan: no date but query present, using today for RAG search")
+                date_to_use = datetime.now().strftime("%Y-%m-%d")
             else:
                 # No date mentioned - don't default to today, ask user instead
                 logger.info(f"🔍 create_plan: no date mentioned, will ask user for date")
@@ -1076,6 +1109,10 @@ async def create_plan(state: PlannerState, planning_llm) -> PlannerState:
             
             logger.info(f"🔍 create_plan: converted date to {date_to_use}")
             
+            # Add date to collected_params so auto-confirmation works for read-only tools
+            params["date"] = date_to_use
+            state["collected_params"] = params
+            
             plan.append({
                 "step": len(plan) + 1,
                 "tool": "proxy_skill",
@@ -1089,6 +1126,10 @@ async def create_plan(state: PlannerState, planning_llm) -> PlannerState:
                     }
                 }
             })
+            
+            # Add query parameter if present (for RAG search in meeting_discussion)
+            if params.get("query"):
+                plan[-1]["parameters"]["parameters"]["query"] = params["query"]
             logger.info(f"🔍 create_plan: created plan step for {detected_skill}")
             state["plan"] = plan
             return state

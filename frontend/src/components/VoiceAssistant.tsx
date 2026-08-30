@@ -21,44 +21,56 @@ export const VoiceAssistant = () => {
   const [runTour, setRunTour] = useState(false);
   const [tourCompleted, setTourCompleted] = useState(hasTourCompleted());
 
- useEffect(() => {
+  useEffect(() => {
   // Get user sub from auth - only run once on mount
   const fetchUser = async () => {
     try {
       const voiceAgentUrl = import.meta.env.VITE_VOICE_AGENT_URL || '';
-      // Detect if running locally (same-origin) vs production (cross-origin)
-      const isLocal = voiceAgentUrl.includes('localhost') || voiceAgentUrl.includes('127.0.0.1');
       
-      const headers: Record<string, string> = {};
-      const fetchOptions: RequestInit = {};
+      // Check if user_sub is in URL (from OAuth callback)
+      const urlParams = new URLSearchParams(window.location.search);
+      const userSubFromUrl = urlParams.get('user_sub');
       
-      if (isLocal) {
-        // Local development: use session cookies
-        fetchOptions.credentials = 'include';
+      let finalUserSub = '';
+      
+      if (userSubFromUrl) {
+        // Use user_sub from URL (OAuth callback)
+        finalUserSub = userSubFromUrl;
+        setUserSub(userSubFromUrl);
+        console.log('Using user_sub from URL:', userSubFromUrl);
+        // Clean URL
+        window.history.replaceState({}, '', window.location.pathname);
       } else {
-        // Production: use JWT token
-        const token = localStorage.getItem('auth_token');
-        if (token) {
-          headers['Authorization'] = `Bearer ${token}`;
+        console.log('No user_sub in URL, trying session-based auth via proxy');
+        // Try session-based auth via Vite proxy (same-origin)
+        const res = await fetch('/auth/me', { credentials: 'include' });
+        if (res.status === 200) {
+          const me = await res.json();
+          const sub = me.user?.sub || '';
+          finalUserSub = sub;
+          setUserSub(sub);
+          console.log('Using user_sub from session:', sub);
+        } else {
+          console.error('Session auth failed');
+          setError('Authentication failed');
+          setLoading(false);
+          return;
         }
       }
-      
-      if (Object.keys(headers).length > 0) {
-        fetchOptions.headers = headers;
-      }
-      
-      const res = await fetch(`${voiceAgentUrl}/auth/me`, fetchOptions);
-      if (res.status === 200) {
-        const me = await res.json();
-        const sub = me.user?.sub || '';
-        setUserSub(sub);
 
-        // Create client and connect immediately after userSub is available
-        const wsUrl = voiceAgentUrl.replace('http://', 'ws://').replace('https://', 'wss://');
-        
-        const newClient = new PipecatClient({
-          transport: new WebSocketTransport({
-            wsUrl: `${wsUrl}/ws/pipecat?user_sub=${sub}`,
+      if (!finalUserSub) {
+        console.error('No user_sub available');
+        setError('Authentication failed - no user ID');
+        setLoading(false);
+        return;
+      }
+
+      // Create client and connect immediately after userSub is available
+      const wsUrl = voiceAgentUrl.replace('http://', 'ws://').replace('https://', 'wss://');
+      
+      const newClient = new PipecatClient({
+        transport: new WebSocketTransport({
+          wsUrl: `${wsUrl}/ws/pipecat?user_sub=${finalUserSub}`,
             serializer: new ProtobufFrameSerializer(),
             recorderSampleRate: 16000,
             playerSampleRate: 24000,
@@ -174,11 +186,6 @@ export const VoiceAssistant = () => {
           console.log('BotReady timeout - hiding spinner anyway');
           setLoading(false);
         }, 10000); // Increased to 10s to account for audio warm-up + fade-in + 3s delay
-
-      } else {
-        setError('Authentication failed');
-        setLoading(false);
-      }
     } catch (e) {
       console.error('Auth check failed', e);
       setError('Failed to connect to backend');

@@ -10,29 +10,33 @@ export const Login = () => {
   const navigate = useNavigate();
 
   useEffect(() => {
-    // Check if token is in URL (from OAuth callback) - only for production
+    // Check if user_sub is in URL (from OAuth callback)
     const urlParams = new URLSearchParams(window.location.search);
-    const token = urlParams.get('token');
-    const voiceAgentUrl = import.meta.env.VITE_VOICE_AGENT_URL || '';
-    const isLocal = voiceAgentUrl.includes('localhost') || voiceAgentUrl.includes('127.0.0.1');
+    const userSub = urlParams.get('user_sub');
     
-    if (token && !isLocal) {
-      // Production: store JWT token
-      localStorage.setItem('auth_token', token);
-      // Clean URL and redirect to assistant
+    if (userSub) {
+      // OAuth callback - redirect to assistant with user_sub
       window.history.replaceState({}, '', window.location.pathname);
       navigate('/assistant');
-    } else if (isLocal) {
-      // Local development: rely on session cookies, redirect directly
-      window.history.replaceState({}, '', window.location.pathname);
-      navigate('/assistant');
+      return;
     }
+    
+    // Only check session if no user_sub in URL - use Vite proxy (same-origin)
+    fetch('/auth/me', { credentials: 'include' })
+      .then(res => {
+        if (res.ok) {
+          window.history.replaceState({}, '', window.location.pathname);
+          navigate('/assistant');
+        }
+      })
+      .catch(() => {
+        // Not authenticated, stay on login page
+      });
   }, [navigate]);
 
   const handleLogin = () => {
-    // Call actual Google OAuth endpoint on Voice Agent backend
-    const voiceAgentUrl = import.meta.env.VITE_VOICE_AGENT_URL || 'http://127.0.0.1:8000';
-    window.location.href = `${voiceAgentUrl}/auth/google/login`;
+    // Call actual Google OAuth endpoint - proxied through Vite
+    window.location.href = '/auth/google/login';
   };
 
   const handleColorChange = (color: string) => {

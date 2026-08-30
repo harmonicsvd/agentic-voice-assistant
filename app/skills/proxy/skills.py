@@ -10,6 +10,7 @@ import os
 
 BACKEND_AGENT_URL = os.getenv("BACKEND_AGENT_URL", "http://127.0.0.1:9000")
 INTERNAL_API_KEY = os.getenv("BACKEND_INTERNAL_API_KEY", "")
+BACKEND_AGENT_TIMEOUT = float(os.getenv("BACKEND_AGENT_TIMEOUT_SECONDS", "20"))
 
 class ProxySkillInput(BaseModel):
     """Input schema for proxy skill."""
@@ -40,7 +41,7 @@ async def proxy_skill(
         "user_sub": user_sub
     }
     try:
-        async with httpx.AsyncClient() as client:
+        async with httpx.AsyncClient(timeout=BACKEND_AGENT_TIMEOUT) as client:
             response = await client.post(url, json=json_body, headers=headers)
         if response.status_code == 200:
             data = response.json()

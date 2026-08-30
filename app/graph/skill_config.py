@@ -139,7 +139,7 @@ def load_skill_configs(force_reload=False) -> dict:
                 }
                 
                 # Set read-only based on skill type
-                if skill_name in ["meeting_discussion", "get_weather"]:
+                if skill_name in ["meeting_discussion", "get_weather", "rag_search"]:
                     configs[skill_name]["is_read_only"] = True
                     configs[skill_name]["requires_confirmation"] = False
                     configs[skill_name]["state_reset_on_cancel"] = False
@@ -151,6 +151,8 @@ def load_skill_configs(force_reload=False) -> dict:
                     configs[skill_name]["context_formatter"] = "format_summary_context"
                 elif skill_name == "get_weather":
                     configs[skill_name]["context_formatter"] = "format_weather_context"
+                elif skill_name == "rag_search":
+                    configs[skill_name]["context_formatter"] = "format_rag_context"
         
         _skill_config_cache = configs
         _cache_timestamp = current_time
@@ -295,6 +297,20 @@ def get_valid_tools() -> list:
     return list(TOOL_CONFIGS.keys())
 
 
+def format_rag_context(params: dict) -> str:
+    """Format RAG search parameters into readable context."""
+    if not params:
+        return ""
+    
+    if params.get("query"):
+        return f"Searching for: {params['query']}. If user provides more details, acknowledge them."
+    
+    return ""
+
+
+
+
+
 def format_meeting_context(params: dict) -> str:
     """
     Format meeting parameters into readable context for the main LLM.
@@ -416,7 +432,9 @@ def format_weather_context(params: dict) -> str:
 CONTEXT_FORMATTERS = {
     "format_meeting_context": format_meeting_context,
     "format_summary_context": format_summary_context,
-    "format_weather_context": format_weather_context
+    "format_weather_context": format_weather_context,
+    "format_rag_context": format_rag_context
+    
 }
 
 

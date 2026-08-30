@@ -939,11 +939,24 @@ class SkillExecutionProcessor(FrameProcessor):
                     # Use active_skill (set from detected_skills)
                     skill_name = self.active_skill or result.get("detected_skills", [""])[0] if result.get("detected_skills") else "this skill"
                     missing_fields_msg = f"EMERGENCY: TOOL EXECUTION WAS SKIPPED. The action was NOT completed. Required fields are missing: {', '.join(missing_fields)}. The user is trying to use the '{skill_name}' skill. DO NOT say 'booked', 'scheduled', 'done', 'completed', or claim any action was taken. Ask the user for the missing information: {', '.join(missing_fields)}. If the user asks about capabilities, tell them they need to install the '{skill_name}' skill. This is critical - the backend did NOT execute the tool."
-                    self.context.add_message({
-                        "role": "system",
-                        "content": missing_fields_msg
-                    })
-                    logger.info(f"🚫 Added missing fields feedback to LLM: {missing_fields} (skill: {skill_name})")
+                    
+                    # Prevent duplicate emergency messages - only add if missing fields have changed
+                    current_messages = self.context.get_messages()
+                    has_duplicate = any(
+                        msg.get("role") == "system" and 
+                        "EMERGENCY: TOOL EXECUTION WAS SKIPPED" in msg.get("content", "") and
+                        f"Required fields are missing: {', '.join(missing_fields)}" in msg.get("content", "")
+                        for msg in current_messages[-5:]  # Check last 5 messages only
+                    )
+                    
+                    if not has_duplicate:
+                        self.context.add_message({
+                            "role": "system",
+                            "content": missing_fields_msg
+                        })
+                        logger.info(f"🚫 Added missing fields feedback to LLM: {missing_fields} (skill: {skill_name})")
+                    else:
+                        logger.info(f"🔄 Skipping duplicate emergency message for missing fields: {missing_fields}")
                 
                 # Add context about collected parameters to help Ram understand the conversation state
                 if self.accumulated_params and self.active_tool:

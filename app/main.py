@@ -53,8 +53,6 @@ import re
 from typing import Optional
 from fastapi.middleware.cors import CORSMiddleware
 from starlette.middleware.sessions import SessionMiddleware
-from fastapi import Header
-import jwt
 
 from app.agents.pipecat_websocket import pipecat_websocket_handler
 
@@ -90,49 +88,12 @@ app.add_middleware(
 app.add_middleware(
     SessionMiddleware,
     secret_key=settings.app_secret_key,
-    same_site="lax",  # Changed back to lax for better compatibility
-    https_only=settings.environment == "production",  # HTTPS only for production, allow HTTP for local dev
-    max_age=None,  # Session cookie (expires when browser closes)
+    same_site="lax",
+    https_only=False,  # local dev
 )
 
 
 oauth = build_oauth()
-
-# JWT Configuration
-JWT_SECRET = settings.app_secret_key
-JWT_ALGORITHM = "HS256"
-JWT_EXPIRATION_HOURS = 24
-
-def create_jwt_token(user_data: dict) -> str:
-    """Create a JWT token for the user."""
-    payload = {
-        "sub": user_data.get("sub"),
-        "email": user_data.get("email"),
-        "name": user_data.get("name"),
-        "picture": user_data.get("picture"),
-        "exp": datetime.now(timezone.utc) + timedelta(hours=JWT_EXPIRATION_HOURS),
-        "iat": datetime.now(timezone.utc),
-    }
-    return jwt.encode(payload, JWT_SECRET, algorithm=JWT_ALGORITHM)
-
-def verify_jwt_token(token: str) -> Optional[dict]:
-    """Verify and decode a JWT token."""
-    try:
-        payload = jwt.decode(token, JWT_SECRET, algorithms=[JWT_ALGORITHM])
-        return payload
-    except jwt.ExpiredSignatureError:
-        return None
-    except jwt.JWTError:
-        return None
-
-def get_user_from_token(authorization: str = Header(None)) -> Optional[dict]:
-    """Extract and verify user from Authorization header."""
-    if not authorization:
-        return None
-    if not authorization.startswith("Bearer "):
-        return None
-    token = authorization.replace("Bearer ", "")
-    return verify_jwt_token(token)
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 LOGIN_HTML = BASE_DIR / "login.html"
@@ -733,23 +694,7 @@ async def auth_google_callback(request: Request):
             "expires_at": token.get("expires_at"),
         }
 
-        user_sub = user_info.get("sub", "")
-        
-        # Store user in session for local development (same-origin)
-        request.session["user"] = {
-            "sub": user_sub,
-            "email": user_info.get("email"),
-            "name": user_info.get("name"),
-            "picture": user_info.get("picture"),
-        }
-        
-        # Create JWT token for frontend (for production cross-origin)
-        jwt_token = create_jwt_token({
-            "sub": user_sub,
-            "email": user_info.get("email"),
-            "name": user_info.get("name"),
-            "picture": user_info.get("picture"),
-        })
+        user_sub = request.session["user"].get("sub", "")
         
         # Save refresh token to database if available
         refresh_token = token.get("refresh_token")
@@ -788,30 +733,17 @@ async def auth_google_callback(request: Request):
             logger.warning(f"OAuth callback - no refresh_token returned by Google. Token keys: {list(token.keys())}")
         
         destination = "/assistant" if _is_profile_complete(_get_profile_row(user_sub)) else "/setup"
-        # Redirect to frontend URL (use environment variable in production, localhost for dev)
-        frontend_url = os.getenv("FRONTEND_URL", "http://localhost:5173")
-        
-        # For local development, don't include JWT token (use session cookies)
-        # For production, include JWT token for cross-origin auth
-        if settings.environment == "production":
-            return RedirectResponse(url=f"{frontend_url}{destination}?token={jwt_token}", status_code=302)
-        else:
-            return RedirectResponse(url=f"{frontend_url}{destination}", status_code=302)
+        # Redirect to React dev server for development
+        react_url = getattr(settings, 'react_dev_url', 'http://localhost:5173')
+        return RedirectResponse(url=f"{react_url}{destination}?user_sub={user_sub}", status_code=302)
     except Exception as e:
         logger.error(f"OAuth callback error: {e}")
         return JSONResponse({"error": f"OAuth callback failed: {str(e)}"}, status_code=500)
 
 
 @app.get("/auth/me")
-async def auth_me(request: Request, authorization: str = Header(None)):
+async def auth_me(request: Request):
     """Return current session user data for frontend bootstrapping."""
-    # Try JWT token first
-    if authorization:
-        user_data = get_user_from_token(authorization)
-        if user_data:
-            return {"authenticated": True, "user": user_data}
-    
-    # Fallback to session
     user = request.session.get("user")
     if not user:
         return JSONResponse({"authenticated": False}, status_code=401)
@@ -895,14 +827,6 @@ async def upload_knowledge_pdf(
 
 def get_current_user_or_401(request: Request):
     """Small auth helper returning `(user, error_response)` tuple."""
-    # Try JWT token first
-    authorization = request.headers.get("Authorization")
-    if authorization:
-        user_data = get_user_from_token(authorization)
-        if user_data:
-            return user_data, None
-    
-    # Fallback to session
     user = request.session.get("user")
     if not user:
         return None, JSONResponse({"error": "authentication required"}, status_code=401)
