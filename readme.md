@@ -4,11 +4,11 @@
 
 ## 🎯 Project Vision
 
-Build a natural, conversational AI assistant that combines voice interaction with intelligent task execution. Create a seamless hands-free experience where users can interact with various digital services through natural speech. The system is designed to be extensible - users can install different tools, with calendar management being the current implementation.
+Build a natural, conversational AI assistant that combines voice interaction with intelligent task execution. Create a seamless hands-free experience where users can interact with various digital services through natural speech. The system uses a modular skill architecture - users can install different capabilities (skills) as needed, with calendar management and knowledge base search being the current implementations.
 
 ## 🎯 What This Does
 
-A voice-enabled AI assistant that lets you schedule meetings and check your calendar using natural conversation. Speak naturally to book meetings, ask about your schedule, and manage your calendar without typing.
+A voice-enabled AI assistant that helps you schedule calendar events, check your schedule, prepare for meetings, and discuss past meetings using your notes. Speak naturally to book meetings, ask about your calendar, or query your uploaded documents without typing.
 
 ## 🔗 How It Connects
 
@@ -31,14 +31,33 @@ Users can have natural conversations with the AI assistant. For example:
 - "Book a meeting with John tomorrow at 3pm"
 - "What meetings do I have today?"
 - "Show me my schedule for this week"
+- "What did we discuss in our last meeting?"
+- "Help me prepare for the product review meeting"
+- "What were the key decisions from the kickoff meeting?"
 
 ### **How It Works:**
 1. You speak naturally through the web interface
 2. AI understands your intent using LangGraph
 3. Voice agent authenticates users via Google OAuth and stores refresh tokens
-4. Voice agent calls backend service to execute calendar operations
+4. Voice agent calls backend service to execute operations
 5. Backend service uses OAuth tokens to directly access Google Calendar API
-6. Results are spoken back to you
+6. For knowledge base queries, backend searches your uploaded documents using RAG
+7. Results are spoken back to you
+
+### **Knowledge Base (RAG):**
+The system supports querying your uploaded documents (PDF, MD, TXT) using semantic search. Ask about meeting notes or any content in your knowledge base to prepare for upcoming meetings or discuss past meetings. The meeting_discussion skill automatically searches and retrieves relevant information.
+
+### **Skill System:**
+The assistant uses a modular skill architecture. Skills are capabilities that can be installed/uninstalled:
+
+**Available Skills:**
+- **google_calendar**: Create and manage calendar events
+- **meeting_discussion**: View calendar schedule and search knowledge base (meeting notes, documents) to prepare for or discuss past meetings
+
+**Skill Details:**
+- **Installation**: Skills are installed via the profile setup page
+- **Auto-Confirmation**: Read-only skills (like `meeting_discussion` when querying knowledge base) execute automatically without confirmation
+- **Extensibility**: New skills can be added to the backend service and automatically become available
 
 ## 🏗️ Technology Stack
 
@@ -99,14 +118,16 @@ python -m uvicorn apps.api.main:app --reload
 
 ### **Environment Variables**
 - `DATABASE_URL`: Supabase PostgreSQL connection string (shared with backend)
-- `OMNIROUTE_API_KEY`: OmniRoute API key (optional - use "free" for no-auth providers)
-- `OMNIROUTE_BASE_URL`: OmniRoute base URL (default: `http://localhost:20128/v1`)
 - `GOOGLE_OAUTH_CLIENT_ID`: Google OAuth client ID (shared with backend)
 - `GOOGLE_OAUTH_CLIENT_SECRET`: Google OAuth client secret (shared with backend)
 - `APP_SECRET_KEY`: FastAPI secret key
 - `INTERNAL_API_KEY`: Internal API key for backend communication (must match backend's `PROFILE_INTERNAL_API_KEY`)
-- `WEATHER_AGENT_BASE_URL`: Backend service URL (`http://127.0.0.1:9000`)
-- `WEATHER_AGENT_INTERNAL_API_KEY`: Backend service API key (must match backend's `WEATHER_INTERNAL_API_KEY`)
+- `BACKEND_AGENT_URL`: Backend service URL (`http://127.0.0.1:9000`)
+- `BACKEND_INTERNAL_API_KEY`: Backend service API key (must match backend's `BACKEND_INTERNAL_API_KEY`)
+- `BACKEND_AGENT_TIMEOUT_SECONDS`: Timeout for backend calls (default: 20)
+- `GROQ_API_KEY`: Groq API key for LLM (required)
+- `HF_TOKEN`: Hugging Face token for model downloads (optional)
+- `REACT_DEV_URL`: Frontend URL (default: `http://localhost:5173`)
 
 ### **Database Setup**
 - **Provider**: Supabase (PostgreSQL hosting)
